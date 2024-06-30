@@ -1,0 +1,224 @@
+2024-06-30T02:28:25.452818Z  WARN ironbar::clients::volume: Couldn't find sink: @DEFAULT_SINK@
+2024-06-30T02:28:25.629001Z ERROR system_tray::client: Error fetching properties from :1.14org.kde.StatusNotifierItem-1039-1/StatusNotifierItem: ServiceUnknown("The name is not activatable")
+2024-06-30T02:28:33.305587Z ERROR ironbar::logging: The application panicked (crashed).
+Message:  assertion failed: !ptr.is_null()
+Location: /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/gdk-pixbuf-0.18.3/src/auto/pixbuf.rs:9
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ BACKTRACE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   1: color_eyre::config::PanicHook::panic_report::h115d2b49a59024d9
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/color-eyre-0.6.3/src/config.rs:1008
+   2: ironbar::logging::install_logging::{{closure}}::h7a0f2e464815e3e5
+      at /home/sridhar/hack/ironbar/src/logging.rs:48
+   3: <alloc::boxed::Box<F,A> as core::ops::function::Fn<Args>>::call::ha9c3bc81d312fd83
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/alloc/src/boxed.rs:2036
+   4: std::panicking::rust_panic_with_hook::hac8bdceee1e4fe2c
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:799
+   5: std::panicking::begin_panic_handler::{{closure}}::h00d785e82757ce3c
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:656
+   6: std::sys_common::backtrace::__rust_end_short_backtrace::h1628d957bcd06996
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/sys_common/backtrace.rs:171
+   7: rust_begin_unwind<unknown>
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:652
+   8: core::panicking::panic_fmt::hdc63834ffaaefae5
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/panicking.rs:72
+   9: core::panicking::panic::h75b3c9209f97d725
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/panicking.rs:146
+  10: <gdk_pixbuf::auto::pixbuf::Pixbuf as glib::translate::FromGlibPtrFull<*mut gdk_pixbuf_sys::GdkPixbuf>>::from_glib_full::hbbd56de07c51ddda
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/object.rs:909
+  11: glib::translate::from_glib_full::h2c03c0c3190fa6dd
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/translate.rs:1631
+  12: gdk_pixbuf::auto::pixbuf::Pixbuf::from_bytes::h8676ec10f3d058ab
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/gdk-pixbuf-0.18.3/src/auto/pixbuf.rs:50
+  13: ironbar::modules::tray::icon::get_image_from_pixmap::hac492ce4b7cfaada
+      at /home/sridhar/hack/ironbar/src/modules/tray/icon.rs:106
+  14: ironbar::modules::tray::icon::get_image::{{closure}}::h5fc81d1f9831a01d
+      at /home/sridhar/hack/ironbar/src/modules/tray/icon.rs:51
+  15: core::result::Result<T,E>::or_else::h3b18e7f1a88d2e20
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/result.rs:1383
+  16: ironbar::modules::tray::icon::get_image::h0f10d55b56312b6b
+      at /home/sridhar/hack/ironbar/src/modules/tray/icon.rs:50
+  17: ironbar::modules::tray::on_update::hbcf76b865bbe465c
+      at /home/sridhar/hack/ironbar/src/modules/tray/mod.rs:190
+  18: <ironbar::modules::tray::TrayModule as ironbar::modules::Module<gtk::auto::menu_bar::MenuBar>>::into_widget::{{closure}}::h3042ac9153594072
+      at /home/sridhar/hack/ironbar/src/modules/tray/mod.rs:161
+  19: glib::main_context_futures::<impl glib::auto::main_context::MainContext>::spawn_local_with_priority::{{closure}}::h5c5aa33ce04e5652
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:564
+  20: <futures_task::future_obj::LocalFutureObj<T> as core::future::future::Future>::poll::hf8e9a2c70dcef504
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-task-0.3.30/src/future_obj.rs:84
+  21: <glib::main_context_futures::FutureWrapper as core::future::future::Future>::poll::h9c071fef44686bc7
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:38
+  22: glib::main_context_futures::TaskSource::poll::{{closure}}::{{closure}}::h5eee5e51be51802a
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:245
+  23: core::ops::function::FnOnce::call_once::h10a62f70c2144df9
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/ops/function.rs:250
+  24: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once::h488ce1f5ae4d5558
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/panic/unwind_safe.rs:272
+  25: std::panicking::try::do_call::h77c2feb7ebf6edcb
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:559
+  26: __rust_try<unknown>
+      at <unknown source file>:<unknown line>
+  27: std::panicking::try::h6472e8578d506e61
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:523
+  28: std::panic::catch_unwind::h932cbd453ce5d2c7
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panic.rs:149
+  29: glib::main_context_futures::TaskSource::poll::{{closure}}::hb08619cc3a103afc
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:244
+  30: glib::main_context::<impl glib::auto::main_context::MainContext>::with_thread_default::h7d24557574242304
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context.rs:154
+  31: glib::main_context_futures::TaskSource::poll::h2a0de1c467d5245c
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:236
+  32: glib::main_context_futures::TaskSource::dispatch::h6b456b01298b5e2b
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:74
+  33: g_main_context_iteration<unknown>
+      at <unknown source file>:<unknown line>
+  34: g_application_run<unknown>
+      at <unknown source file>:<unknown line>
+  35: gio::application::ApplicationExtManual::run_with_args::h1dfcde02bbf5d415
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/gio-0.18.4/src/application.rs:29
+  36: ironbar::Ironbar::start::hc032357168e13f24
+      at /home/sridhar/hack/ironbar/src/main.rs:240
+  37: ironbar::start_ironbar::h04e9f531f3ff1f24
+      at /home/sridhar/hack/ironbar/src/main.rs:291
+  38: ironbar::run_with_args::h5421aa680c2b66a4
+      at /home/sridhar/hack/ironbar/src/main.rs:107
+  39: ironbar::main::h889758c0a5da447b
+      at /home/sridhar/hack/ironbar/src/main.rs:68
+  40: core::ops::function::FnOnce::call_once::h1e583a43525a85ea
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/ops/function.rs:250
+  41: std::sys_common::backtrace::__rust_begin_short_backtrace::h8e469e54dde841c6
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/sys_common/backtrace.rs:155
+  42: std::rt::lang_start::{{closure}}::h67a5dce0b72c8392
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/rt.rs:159
+  43: core::ops::function::impls::<impl core::ops::function::FnOnce<A> for &F>::call_once::h6abeee5a7794ceb5
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/ops/function.rs:284
+  44: std::panicking::try::do_call::hd6e966bb06877057
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:559
+  45: std::panicking::try::hc9b3807f5768cb19
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:523
+  46: std::panic::catch_unwind::h94a757c154076c6e
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panic.rs:149
+  47: std::rt::lang_start_internal::{{closure}}::hc5223fb36050c743
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/rt.rs:141
+  48: std::panicking::try::do_call::hddf7b4e1ebeb3f69
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:559
+  49: std::panicking::try::h1842860a1f941a31
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:523
+  50: std::panic::catch_unwind::h009016ccf811d4c3
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panic.rs:149
+  51: std::rt::lang_start_internal::h3ed4fe7b2f419135
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/rt.rs:141
+  52: std::rt::lang_start::hc3cb65d2f5eb6381
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/rt.rs:158
+  53: main<unknown>
+      at <unknown source file>:<unknown line>
+  54: __libc_start_main<unknown>
+      at <unknown source file>:<unknown line>
+  55: _start<unknown>
+      at <unknown source file>:<unknown line>
+
+Run with COLORBT_SHOW_HIDDEN=1 environment variable to disable frame filtering.
+Run with RUST_BACKTRACE=full to include source snippets.
+2024-06-30T02:28:33.333848Z ERROR ironbar::logging: The application panicked (crashed).
+Message:  Failed to send message to channel: SendError(Update(":1.41", Menu(TrayMenu { id: 1, submenus: [MenuItem { id: 18, menu_type: Standard, label: Some("Free space: "), enabled: false, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 17, menu_type: Standard, label: Some("Not started"), enabled: false, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 16, menu_type: Separator, label: None, enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 15, menu_type: Standard, label: Some("Recent events"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 14, menu_type: Standard, label: Some("Open OneDrive folder"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 13, menu_type: Standard, label: Some("Restart the synchronization"), enabled: false, visible: false, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 12, menu_type: Standard, label: Some("Suspend the synchronization"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 11, menu_type: Separator, label: None, enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 10, menu_type: Standard, label: Some("Icon color"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [MenuItem { id: 6, menu_type: Standard, label: Some("Blue"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: Radio, toggle_state: Off, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 5, menu_type: Standard, label: Some("White"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: Radio, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 4, menu_type: Standard, label: Some("Red"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: Radio, toggle_state: Off, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 3, menu_type: Standard, label: Some("Green"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: Radio, toggle_state: Off, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 2, menu_type: Standard, label: Some("Black"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: Radio, toggle_state: Off, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 1, menu_type: Standard, label: Some("More colors..."), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: Radio, toggle_state: Off, children_display: None, disposition: Normal, submenu: [] }] }, MenuItem { id: 9, menu_type: Separator, label: None, enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 8, menu_type: Standard, label: Some("Quit OneDrive"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }, MenuItem { id: 7, menu_type: Standard, label: Some("About OneDrive"), enabled: true, visible: true, icon_name: None, icon_data: None, shortcut: None, toggle_type: CannotBeToggled, toggle_state: On, children_display: None, disposition: Normal, submenu: [] }] })))
+Location: src/modules/mod.rs:381
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ BACKTRACE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   1: color_eyre::config::PanicHook::panic_report::h115d2b49a59024d9
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/color-eyre-0.6.3/src/config.rs:1008
+   2: ironbar::logging::install_logging::{{closure}}::h7a0f2e464815e3e5
+      at /home/sridhar/hack/ironbar/src/logging.rs:48
+   3: <alloc::boxed::Box<F,A> as core::ops::function::Fn<Args>>::call::ha9c3bc81d312fd83
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/alloc/src/boxed.rs:2036
+   4: std::panicking::rust_panic_with_hook::hac8bdceee1e4fe2c
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:799
+   5: std::panicking::begin_panic_handler::{{closure}}::h00d785e82757ce3c
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:664
+   6: std::sys_common::backtrace::__rust_end_short_backtrace::h1628d957bcd06996
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/sys_common/backtrace.rs:171
+   7: rust_begin_unwind<unknown>
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:652
+   8: core::panicking::panic_fmt::hdc63834ffaaefae5
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/panicking.rs:72
+   9: core::result::unwrap_failed::h82b551e0ff2b2176
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/result.rs:1654
+  10: core::result::Result<T,E>::expect::hca58dd04b64b8fa4
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/result.rs:1034
+  11: <ironbar::modules::BarModuleFactory as ironbar::modules::ModuleFactory>::setup_receiver::{{closure}}::h0dae322288d77bfa
+      at /home/sridhar/hack/ironbar/src/macros.rs:55
+  12: glib::main_context_futures::<impl glib::auto::main_context::MainContext>::spawn_local_with_priority::{{closure}}::heada48f432cd52d2
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:564
+  13: <futures_task::future_obj::LocalFutureObj<T> as core::future::future::Future>::poll::hf8e9a2c70dcef504
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-task-0.3.30/src/future_obj.rs:84
+  14: <glib::main_context_futures::FutureWrapper as core::future::future::Future>::poll::h9c071fef44686bc7
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:38
+  15: glib::main_context_futures::TaskSource::poll::{{closure}}::{{closure}}::h5eee5e51be51802a
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:245
+  16: core::ops::function::FnOnce::call_once::h10a62f70c2144df9
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/ops/function.rs:250
+  17: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once::h488ce1f5ae4d5558
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/panic/unwind_safe.rs:272
+  18: std::panicking::try::do_call::h77c2feb7ebf6edcb
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:559
+  19: __rust_try<unknown>
+      at <unknown source file>:<unknown line>
+  20: std::panicking::try::h6472e8578d506e61
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:523
+  21: std::panic::catch_unwind::h932cbd453ce5d2c7
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panic.rs:149
+  22: glib::main_context_futures::TaskSource::poll::{{closure}}::hb08619cc3a103afc
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:244
+  23: glib::main_context::<impl glib::auto::main_context::MainContext>::with_thread_default::h7d24557574242304
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context.rs:154
+  24: glib::main_context_futures::TaskSource::poll::h2a0de1c467d5245c
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:236
+  25: glib::main_context_futures::TaskSource::dispatch::h6b456b01298b5e2b
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/glib-0.18.5/src/main_context_futures.rs:74
+  26: g_main_context_iteration<unknown>
+      at <unknown source file>:<unknown line>
+  27: g_application_run<unknown>
+      at <unknown source file>:<unknown line>
+  28: gio::application::ApplicationExtManual::run_with_args::h1dfcde02bbf5d415
+      at /home/sridhar/.cargo/registry/src/index.crates.io-6f17d22bba15001f/gio-0.18.4/src/application.rs:29
+  29: ironbar::Ironbar::start::hc032357168e13f24
+      at /home/sridhar/hack/ironbar/src/main.rs:240
+  30: ironbar::start_ironbar::h04e9f531f3ff1f24
+      at /home/sridhar/hack/ironbar/src/main.rs:291
+  31: ironbar::run_with_args::h5421aa680c2b66a4
+      at /home/sridhar/hack/ironbar/src/main.rs:107
+  32: ironbar::main::h889758c0a5da447b
+      at /home/sridhar/hack/ironbar/src/main.rs:68
+  33: core::ops::function::FnOnce::call_once::h1e583a43525a85ea
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/ops/function.rs:250
+  34: std::sys_common::backtrace::__rust_begin_short_backtrace::h8e469e54dde841c6
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/sys_common/backtrace.rs:155
+  35: std::rt::lang_start::{{closure}}::h67a5dce0b72c8392
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/rt.rs:159
+  36: core::ops::function::impls::<impl core::ops::function::FnOnce<A> for &F>::call_once::h6abeee5a7794ceb5
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/core/src/ops/function.rs:284
+  37: std::panicking::try::do_call::hd6e966bb06877057
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:559
+  38: std::panicking::try::hc9b3807f5768cb19
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:523
+  39: std::panic::catch_unwind::h94a757c154076c6e
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panic.rs:149
+  40: std::rt::lang_start_internal::{{closure}}::hc5223fb36050c743
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/rt.rs:141
+  41: std::panicking::try::do_call::hddf7b4e1ebeb3f69
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:559
+  42: std::panicking::try::h1842860a1f941a31
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panicking.rs:523
+  43: std::panic::catch_unwind::h009016ccf811d4c3
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/panic.rs:149
+  44: std::rt::lang_start_internal::h3ed4fe7b2f419135
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/rt.rs:141
+  45: std::rt::lang_start::hc3cb65d2f5eb6381
+      at /rustc/129f3b9964af4d4a709d1383930ade12dfe7c081/library/std/src/rt.rs:158
+  46: main<unknown>
+      at <unknown source file>:<unknown line>
+  47: __libc_start_main<unknown>
+      at <unknown source file>:<unknown line>
+  48: _start<unknown>
+      at <unknown source file>:<unknown line>
+
+Run with COLORBT_SHOW_HIDDEN=1 environment variable to disable frame filtering.
+Run with RUST_BACKTRACE=full to include source snippets.
