@@ -100,13 +100,7 @@ where
                     let tx = tx.clone();
 
                     button.connect_clicked(move |_button| {
-                        // TODO: this needs refactoring to call open from the controller
-                        let file_name = file_name.clone();
-                        let command = command.clone();
-
-                        glib::spawn_future_local(async move {
-                            open_program(&file_name, &command).await
-                        });
+                        open_program(&file_name, &command);
 
                         sub_menu.hide();
                         tx.send_spawn(ModuleUpdateEvent::ClosePopup);
