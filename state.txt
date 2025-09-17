@@ -1,0 +1,32 @@
+=== Fresh Ubuntu 24.04 Act Container State ===
+Date: 2025-09-17 02:05:00 EDT
+Container: act-Binary-get-last-release-8d41f5e4806782d3f48fa6fbe743d5592acf85485ff7ce3280d3bca65b871280
+
+## dpkg Architectures
+Primary architecture: amd64
+Foreign architectures: (none)
+
+## APT Sources Directory Contents
+- azure-cli.sources
+- microsoft-prod.list  
+- ubuntu.sources
+
+## Original ubuntu.sources
+Uses: mirror+file:/etc/apt/apt-mirrors.txt
+Suites: noble noble-updates noble-backports noble-security
+Components: main universe restricted multiverse
+
+## Original apt-mirrors.txt
+http://azure.archive.ubuntu.com/ubuntu/  priority:1
+https://archive.ubuntu.com/ubuntu/       priority:2  
+https://security.ubuntu.com/ubuntu/      priority:3
+
+## Problem Analysis
+The container uses mirror+file configuration where apt-mirrors.txt contains ONLY AMD64-compatible mirrors.
+When ARM64 architecture is added, apt tries to fetch ARM64 packages from these AMD64-only mirrors, causing 404 errors.
+
+## Solution Required
+Replace the mirror+file configuration with architecture-specific entries:
+- AMD64 entries should use archive.ubuntu.com and security.ubuntu.com
+- ARM64 entries should use ports.ubuntu.com/ubuntu-ports
+- Each entry must have Architectures: field to prevent cross-contamination

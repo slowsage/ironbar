@@ -1,65 +1,52 @@
-name: Binary
+name: Binary Build
 on:
-  workflow_run:
-    workflows: [ Deploy ]
-    types: [ completed ]
   release:
-    types: [ created ]
+    types: [created]
   workflow_dispatch:
 
 jobs:
-  get_last_release:
-    runs-on: ubuntu-latest
-    outputs:
-      latest_release_tag: ${{ steps.latest-release.outputs.LATEST_RELEASE_TAG }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Extract the latest release
-        id: latest-release
-        run: echo "LATEST_RELEASE_TAG=$(gh release ls --json isLatest,tagName -q '.[] | select(.isLatest == true) | .tagName')" >> $GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
   build:
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
-    name: Build
-    runs-on: ${{matrix.platform.image}}
-    container: ghcr.io/jakestanger/ironbar-build:master
-    needs: get_last_release
+    runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
-        platform:
-          - { image: ubuntu-latest, name: x86_64 }
-          - { image: ubuntu-24.04-arm, name: arm64 }
-
+        arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.get_last_release.outputs.latest_release_tag }}
-
-      - name: Add OpenSSL crate (vendored)
-        run: cargo add openssl --features vendored
-
-      - name: Build Release
-        run: cargo build --locked --release
-
-      - name: Compress the built binary
-        run: tar -zcvf ironbar-${{needs.get_last_release.outputs.latest_release_tag}}-${{matrix.platform.name}}.tar.gz -C target/release ironbar
-
-      - name: Take ownership of repo
-        run: git config --global --add safe.directory .
-
+          
+      - name: Setup dependencies
+        env:
+          CROSS_DEB_ARCH: ${{ matrix.arch == 'aarch64' && 'arm64' || '' }}
+        run: ./.github/scripts/ubuntu_setup.sh
+      
+      - name: Get binary name
+        run: echo "BINARY_NAME=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].targets[] | select( .kind | map(. == "bin") | any ) | .name')" >> $GITHUB_ENV
+          
+      - name: Build binary
+        run: |
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            export AARCH64_UNKNOWN_LINUX_GNU_PKG_CONFIG=aarch64-linux-gnu-pkg-config
+            export PKG_CONFIG_ALLOW_CROSS=1
+            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+            export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+            export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            export PKG_CONFIG=aarch64-linux-gnu-pkg-config
+            export PKG_CONFIG_SYSROOT_DIR=/
+            export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig
+          fi
+          cargo build --locked --release --target ${{ matrix.arch }}-unknown-linux-gnu
+          file target/${{ matrix.arch }}-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
+          
+      - name: Create release archive
+        run: |
+          VERSION="${{ github.event.release.tag_name || github.sha }}"
+          ARCHIVE="${{ env.BINARY_NAME }}-${VERSION}-${{ matrix.arch }}-unknown-linux-gnu.tar.gz"
+          tar -czf "${ARCHIVE}" -C target/${{ matrix.arch }}-unknown-linux-gnu/release ${{ env.BINARY_NAME }}
+          echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
+          ls -lh "${ARCHIVE}"
+          
       - name: Upload to release
-        run: gh release upload ${{needs.get_last_release.outputs.latest_release_tag}} ironbar-${{needs.get_last_release.outputs.latest_release_tag}}-${{matrix.platform.name}}.tar.gz
+        if: github.event_name == 'release'
+        run: gh release upload "${{ github.event.release.tag_name }}" "${{ env.ARCHIVE }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  on-failure:
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' }}
-
-    steps:
-      - run: echo 'The triggering workflow Deploy failed'
-      - run: exit 1
