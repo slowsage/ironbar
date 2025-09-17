@@ -1,0 +1,17 @@
+# Act configuration for local GitHub Actions testing with cross-compilation support
+
+# Platform mappings - Use ChristopherHX's large image (has Rust pre-installed)
+-P ubuntu-24.04=ghcr.io/christopherhx/runner-images:ubuntu24-runner-large-latest
+-P ubuntu-latest=ghcr.io/christopherhx/runner-images:ubuntu24-runner-large-latest
+
+# Force x86_64 architecture for cross-compilation
+--container-architecture linux/amd64
+
+# Don't use gitignore
+--use-gitignore=false
+
+# Verbose output for debugging
+-v
+
+# Leave container running after act finishes
+--rm=false
