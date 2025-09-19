@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -e
+
+# All env vars verified as necessary (non-redundant)
+export DEBIAN_FRONTEND=noninteractive
+export DEBIAN_PRIORITY=critical
+export APT_LISTCHANGES_FRONTEND=none
+export MOTD_SHOWN=true
+
+# Remove apt-check for QEMU performance (necessary even with DPkg::Post-Invoke)
+sudo rm -f /etc/apt/apt.conf.d/50command-not-found
+sudo mv /usr/lib/update-notifier/apt-check /usr/lib/update-notifier/apt-check.disabled 2>/dev/null || true
+echo '#!/bin/bash\nexit 0' | sudo tee /usr/lib/update-notifier/apt-check > /dev/null
+sudo chmod +x /usr/lib/update-notifier/apt-check
+
+sudo dpkg --configure -a || true
+
+sudo apt-get update \
+  -o APT::Update::Post-Invoke::="" \
+  -o APT::Update::Post-Invoke-Success::=""
+
+# All flags verified as necessary (non-redundant)
+sudo apt-get install -y --no-install-recommends \
+  -o DPkg::Post-Invoke::="" \
+  -o APT::Update::Post-Invoke-Success::="" \
+  -o Dpkg::Options::="--force-confold" \
+  -o Dpkg::Options::="--force-confdef" \
+  libssl-dev libgtk-3-dev libgtk-layer-shell-dev \
+  libinput-dev libdbusmenu-gtk3-dev libdbus-1-dev \
+  libpulse-dev libluajit-5.1-dev

@@ -28,8 +28,8 @@ jobs:
       - name: Configure QEMU optimizations
         run: |
           if pmap 1 2>/dev/null | grep -q qemu; then
-            echo "QEMU_CPU=max,pauth=off" >> $GITHUB_ENV
             echo "CARGO_BUILD_JOBS=1" >> $GITHUB_ENV
+            echo "QEMU_CPU=max,pauth=off" >> $GITHUB_ENV
             echo "RUSTFLAGS=-C codegen-units=1 -C opt-level=0 -C lto=false -C debuginfo=0 -C strip=symbols" >> $GITHUB_ENV
           fi
 

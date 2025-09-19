@@ -1,0 +1,15 @@
+# Act configuration for local GitHub Actions testing
+
+# Platform mappings
+-P ubuntu-latest=ghcr.io/christopherhx/runner-images:ubuntu24-runner-large-latest
+-P ubuntu-24.04-arm=ghcr.io/christopherhx/runner-images:ubuntu24-runner-large-latest-arm64
+
+
+# Verbose output for debugging
+-v
+
+# Leave container running after act finishes
+--rm=false
+
+# Keep containers after successful runs for inspection
+-r
