@@ -1,0 +1,8 @@
+# Act configuration for local GitHub Actions testing
+
+# Platform mappings
+-P ubuntu-latest=ghcr.io/christopherhx/runner-images:ubuntu24-runner-medium-rust-latest-amd64
+-P ubuntu-24.04-arm=ghcr.io/christopherhx/runner-images:ubuntu24-runner-medium-rust-latest-arm64
+
+# Keep container running after act finishes for debugging
+--rm=false

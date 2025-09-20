@@ -1,21 +1,18 @@
 #!/usr/bin/env bash
+set -e
 
-apt-get update && apt-get install --assume-yes \
-	libssl-dev \
-	libgtk-3-dev \
-	libgtk-layer-shell-dev \
-	libinput-dev \
-	libdbusmenu-gtk3-dev \
-	libpulse-dev \
-	libluajit-5.1-dev
+if pmap 1 2>/dev/null | grep -q qemu; then
+  {
+    echo "QEMU_CPU=max,pauth=off" # need to export as well
+    echo "CARGO_BUILD_JOBS=1"
+    echo "RUSTFLAGS=-C codegen-units=1 -C opt-level=0 -C lto=false -C debuginfo=0 -C strip=symbols"
+  } >>"$GITHUB_ENV"
 
-# GH CLI, required by some CI jobs
-(type -p wget >/dev/null || (apt update && apt install wget -y)) \
-	&& mkdir -p -m 755 /etc/apt/keyrings \
-	&& out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-	&& cat "$out" | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
-	&& chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-	&& mkdir -p -m 755 /etc/apt/sources.list.d \
-	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-	&& apt update \
-	&& apt install gh -y
+  sudo mv /usr/lib/update-notifier/apt-check{,.disabled} 2>/dev/null || :
+  sudo ln -sf /bin/true /usr/lib/update-notifier/apt-check
+  sudo rm -f /etc/apt/apt.conf.d/50command-not-found /etc/update-motd.d/90-updates-available
+  sudo chmod -x /usr/lib/update-notifier/update-motd-updates-available 2>/dev/null || :
+fi
+
+sudo apt-get update -o APT::Update::Post-Invoke::="" -o APT::Update::Post-Invoke-Success::=""
+sudo apt-get install -y --no-install-recommends -o DPkg::Post-Invoke::="" -o APT::Update::Post-Invoke-Success::="" "$@"
