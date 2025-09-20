@@ -1,62 +1,50 @@
-name: Binary
+name: Binary Build
 on:
-  workflow_run:
-    workflows: [ Deploy ]
-    types: [ completed ]
-  release:
-    types: [ created ]
   workflow_dispatch:
+  release:
+    types: [created]
 
 jobs:
-  get_last_release:
-    runs-on: ubuntu-latest
-    outputs:
-      latest_release_tag: ${{ steps.latest-release.outputs.LATEST_RELEASE_TAG }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Extract the latest release
-        id: latest-release
-        run: echo "LATEST_RELEASE_TAG=$(gh release ls --json isLatest,tagName -q '.[] | select(.isLatest == true) | .tagName')" >> $GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
   build:
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
-    name: Build
-    runs-on: ${{matrix.platform.image}}
-    container: ghcr.io/jakestanger/ironbar-build:master
-    needs: get_last_release
     strategy:
-      fail-fast: false
       matrix:
-        platform:
-          - { image: ubuntu-latest, name: x86_64 }
-          - { image: ubuntu-24.04-arm, name: arm64 }
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, arch: x86_64 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm, arch: aarch64 }
 
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Update Rust toolchain
+        run: rustup update stable
+
+      - name: Install system dependencies
+        run: |
+          # Tooling for metadata-driven discovery.
+          ./.github/scripts/ubuntu_setup.sh pkg-config jq apt-file
+          if [ "$(id -u)" -eq 0 ]; then apt-file update; else sudo apt-file update; fi
+          # Derive the GTK stack and dbus -dev packages from the dependency tree's
+          # pkg-config metadata. Supplemented with deps whose crates do not yet
+          # expose it (pending upstream PRs: colpetto, libpulse-sys, evdev-sys, mlua).
+          deps=$(./.github/scripts/discover_deps.sh)
+          echo "Discovered: $deps"
+          [ -n "$deps" ] || { echo "::error::dependency discovery found no packages"; exit 1; }
+          ./.github/scripts/ubuntu_setup.sh $deps libinput-dev libpulse-dev libevdev-dev libluajit-5.1-dev
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          echo "crate=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].name')" >> $GITHUB_OUTPUT
+          echo "bins=$(cargo metadata --no-deps --format-version=1 | jq -r '[.packages[0].targets[] | select(.kind[] == "bin") | .name] | join(",")')" >> $GITHUB_OUTPUT
+
+      - name: Build and upload binary
+        uses: taiki-e/upload-rust-binary-action@v1
+        id: upload
         with:
-          ref: ${{ needs.get_last_release.outputs.latest_release_tag }}
-
-      - name: Build Release
-        run: cargo build --locked --profile tagged-release
-
-      - name: Compress the built binary
-        run: tar -zcvf ironbar-${{needs.get_last_release.outputs.latest_release_tag}}-${{matrix.platform.name}}.tar.gz -C target/tagged-release ironbar
-
-      - name: Take ownership of repo
-        run: git config --global --add safe.directory .
-
-      - name: Upload to release
-        run: gh release upload ${{needs.get_last_release.outputs.latest_release_tag}} ironbar-${{needs.get_last_release.outputs.latest_release_tag}}-${{matrix.platform.name}}.tar.gz
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  on-failure:
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' }}
-
-    steps:
-      - run: echo 'The triggering workflow Deploy failed'
-      - run: exit 1
+          bin: ${{ steps.meta.outputs.bins }}
+          target: ${{ matrix.target }}
+          # Match the cargo-binstall pkg-url: {name}-v{version}-{target-arch}.
+          # $tag is expanded by the action to the release tag (e.g. v0.18.0).
+          archive: ${{ steps.meta.outputs.crate }}-$tag-${{ matrix.arch }}
+          dry-run: ${{ env.ACT == 'true' }}
