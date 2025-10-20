@@ -9,6 +9,8 @@ use std::sync::Arc;
 pub mod bluetooth;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
+#[cfg(feature = "inhibit")]
+pub mod inhibit;
 #[cfg(any(
     feature = "bindmode",
     feature = "hyprland",
@@ -28,6 +30,8 @@ pub mod networkmanager;
 pub mod sway;
 #[cfg(feature = "notifications")]
 pub mod swaync;
+#[cfg(feature = "inhibit")]
+pub mod systemd_idle_inhibit;
 #[cfg(feature = "sys_info")]
 pub mod sysinfo;
 #[cfg(feature = "tray")]
@@ -65,6 +69,8 @@ pub struct Clients {
     network_manager: Option<Arc<networkmanager::Client>>,
     #[cfg(feature = "notifications")]
     notifications: Option<Arc<swaync::Client>>,
+    #[cfg(feature = "inhibit")]
+    systemd_idle_inhibit: Option<Arc<systemd_idle_inhibit::Client>>,
     #[cfg(feature = "sys_info")]
     sys_info: Option<Arc<sysinfo::Client>>,
     #[cfg(feature = "tray")]
@@ -212,6 +218,26 @@ impl Clients {
         };
 
         Ok(client)
+    }
+
+    #[cfg(feature = "inhibit")]
+    pub fn systemd_idle_inhibit(&mut self) -> ClientResult<systemd_idle_inhibit::Client> {
+        if let Some(client) = &self.systemd_idle_inhibit {
+            Ok(client.clone())
+        } else {
+            let client = await_sync(async { systemd_idle_inhibit::Client::new().await })?;
+            let client = Arc::new(client);
+            self.systemd_idle_inhibit = Some(client.clone());
+            Ok(client)
+        }
+    }
+
+    #[cfg(feature = "inhibit")]
+    pub fn inhibit(
+        &mut self,
+        backend_type: inhibit::BackendType,
+    ) -> color_eyre::Result<inhibit::InhibitClient> {
+        inhibit::InhibitClient::new(backend_type, self)
     }
 
     #[cfg(feature = "sys_info")]

@@ -79,7 +79,7 @@ custom = []
 
 focused = []
 
-inhibit = ["zbus", "futures-lite", "chrono", "humantime"]
+inhibit = ["zbus", "futures-lite", "gdk4-wayland"]
 
 keyboard = ["dep:colpetto", "dep:evdev-rs", "dep:rustix", "futures-lite"]
 "keyboard+all" = ["keyboard", "keyboard+sway", "keyboard+hyprland"]
@@ -124,6 +124,7 @@ extras = ["dep:schemars", "dep:clap_complete"]
 [dependencies]
 # core
 gtk = { package = "gtk4", version = "0.10.0", features = ["v4_10"] }
+gdk4-wayland = { version = "0.10.0", features = ["v4_10", "wayland_crate"], optional = true }
 gtk-layer-shell = { package = "gtk4-layer-shell", version = "0.6.3" }
 glib = "0.21.1"
 tokio = { version = "1.48.0", features = [
@@ -171,7 +172,7 @@ lua-src = { version = "548.1.2", optional = true }
 mlua = { version = "0.11.4", optional = true, features = ["luajit", "send"] }
 
 # clock
-chrono = { version = "0.4.42", optional = true, default-features = false, features = ["clock", "unstable-locales"] }
+# (chrono moved to shared)
 
 # keyboard
 colpetto = { version = "0.7.0", features = ["tokio", "tracing"], optional = true }
@@ -196,7 +197,7 @@ libpulse-binding = { version = "2.30.1", optional = true }
 # shared
 futures-lite = { version = "2.6.1", optional = true } # battery, network_manager, workspaces, keyboard, inhibit
 zbus = { version = "5.11.0", default-features = false, features = ["tokio"], optional = true } # battery, network_manager, notifications, inhibit
-humantime = { version = "2.1.0", optional = true } # inhibit
+chrono = { version = "0.4.42", optional = true, default-features = false, features = ["clock", "unstable-locales"] } # clock, inhibit
 swayipc-async = { version = "2.1.1", optional = true } # workspaces, keyboard
 hyprland = { version = "0.4.0-beta.3", optional = true } # workspaces, keyboard
 rustix = { version = "1.1.2", default-features = false, features = ["std", "fs", "pipe", "event"], optional = true } # clipboard, input

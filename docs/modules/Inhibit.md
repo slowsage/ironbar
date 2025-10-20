@@ -8,7 +8,7 @@ Supports systemd and Wayland idle inhibit protocols.
 
 | Name              | Type                       | Default         | Description                                                                                 |
 | ----------------- | -------------------------- | --------------- | ------------------------------------------------------------------------------------------- |
-| `backend`         | `'systemd'` or `'wayland'` | `'systemd'`     | Backend to use for inhibiting idle/sleep.                                                   |
+| `backend`         | `'systemd'` or `'wayland'` | `'wayland'`     | Backend to use for inhibiting idle/sleep.                                                   |
 | `durations`       | `string[]`                 | See below       | List of durations to cycle through. Prefix with `*` to set as default. See duration format. |
 | `on_click_left`   | `'toggle'` or `'cycle'`    | `'toggle'`      | Action on left click.                                                                       |
 | `on_click_right`  | `'toggle'` or `'cycle'`    | `'cycle'`       | Action on right click.                                                                      |
@@ -18,9 +18,9 @@ Supports systemd and Wayland idle inhibit protocols.
 
 > **Note:** The systemd backend persists across ironbar restarts; wayland does not.
 
-**Default durations:** `["30m", "1h", "1h30m", "*2h", "inf"]`
+**Default durations:** `["00:30:00", "01:00:00", "01:30:00", "*02:00:00", "0"]`
 
-**Duration format:** Accepts human-readable durations like `30m`, `1h30m`, `2h`. Use `inf`, `infinity`, `∞`, or empty string for infinite duration. Prefix with `*` to set as default.
+**Duration format:** Time format `HH:MM:SS` (e.g., `01:30:00` for 1 hour 30 minutes). Use `0` for infinite duration. Prefix with `*` to set as default.
 
 ### Click Actions
 
@@ -35,8 +35,8 @@ Supports systemd and Wayland idle inhibit protocols.
   "end": [
     {
       "type": "inhibit",
-      "backend": "systemd",
-      "durations": ["30m", "1h", "1h30m", "*2h", "inf"],
+      "backend": "wayland",
+      "durations": ["00:30:00", "01:00:00", "01:30:00", "*02:00:00", "0"],
       "on_click_left": "toggle",
       "on_click_right": "cycle",
       "format_on": "☕ {duration}",
@@ -54,8 +54,8 @@ Supports systemd and Wayland idle inhibit protocols.
 ```toml
 [[end]]
 type = "inhibit"
-backend = "systemd"
-durations = ["30m", "1h", "1h30m", "*2h", "inf"]
+backend = "wayland"
+durations = ["00:30:00", "01:00:00", "01:30:00", "*02:00:00", "0"]
 on_click_left = "toggle"
 on_click_right = "cycle"
 format_on = "☕ {duration}"
@@ -70,8 +70,8 @@ format_off = "💤 {duration}"
 ```yaml
 end:
   - type: "inhibit"
-    backend: "systemd"
-    durations: ["30m", "1h", "1h30m", "*2h", "inf"]
+    backend: "wayland"
+    durations: ["00:30:00", "01:00:00", "01:30:00", "*02:00:00", "0"]
     on_click_left: "toggle"
     on_click_right: "cycle"
     format_on: "☕ {duration}"
@@ -88,8 +88,8 @@ end:
   end = [
     {
       type = "inhibit"
-      backend = "systemd"
-      durations = ["30m" "1h" "1h30m" "*2h" "inf"]
+      backend = "wayland"
+      durations = ["00:30:00" "01:00:00" "01:30:00" "*02:00:00" "0"]
       on_click_left = "toggle"
       on_click_right = "cycle"
       format_on = "☕ {duration}"

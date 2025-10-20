@@ -6,15 +6,15 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::channels::{AsyncSenderExt, BroadcastReceiverExt};
+use crate::clients::inhibit::InhibitClient;
 use crate::gtk_helpers::{IronbarGtkExt, MouseButton};
 use crate::modules::{Module, ModuleInfo, ModuleParts, ModuleUpdateEvent, WidgetContext};
 use crate::{module_impl, spawn};
 
 mod config;
-mod systemd;
-mod wayland;
 
-pub use config::{BackendType, InhibitCommand, InhibitModule};
+use config::InhibitAction;
+pub use config::{InhibitCommand, InhibitModule};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum State {
@@ -22,56 +22,13 @@ pub enum State {
     Active { remaining: Duration },
 }
 
-enum Backend {
-    Systemd(systemd::SystemdBackend),
-    Wayland(wayland::WaylandBackend),
-}
-
-impl Backend {
-    fn expiry(&self) -> Option<chrono::DateTime<Utc>> {
-        match self {
-            Backend::Systemd(b) => b.expiry,
-            Backend::Wayland(b) => b.expiry,
-        }
-    }
-
-    async fn start(&mut self, duration: Duration) -> Result<()> {
-        match self {
-            Backend::Systemd(b) => b.start(duration).await,
-            Backend::Wayland(b) => b.start(duration).await,
-        }
-    }
-
-    async fn stop(&mut self) -> Result<()> {
-        match self {
-            Backend::Systemd(b) => b.stop().await,
-            Backend::Wayland(b) => b.stop().await,
-        }
-    }
-}
-
-fn calculate_expiry(duration: Duration) -> Option<chrono::DateTime<Utc>> {
-    match duration {
-        // Map Duration::MAX to DateTime::MAX for infinite inhibit
-        Duration::MAX => Some(chrono::DateTime::<Utc>::MAX_UTC),
-        d => Utc::now().checked_add_signed(chrono::Duration::from_std(d).ok()?),
-    }
-}
-
-async fn create_backend(ty: BackendType) -> Result<Backend> {
-    match ty {
-        BackendType::Systemd => Ok(Backend::Systemd(systemd::SystemdBackend::new().await?)),
-        BackendType::Wayland => Ok(Backend::Wayland(wayland::WaylandBackend::new().await?)),
-    }
-}
-
-fn get_state(backend: &Backend, selected_duration: Duration) -> State {
-    match backend.expiry() {
+fn get_state(client: &InhibitClient, selected_duration: Duration) -> State {
+    match client.expiry() {
         None => State::Inactive { selected_duration },
-        Some(dt) if dt == chrono::DateTime::<Utc>::MAX_UTC => State::Active {
+        Some(expiry_time) if expiry_time == chrono::DateTime::<Utc>::MAX_UTC => State::Active {
             remaining: Duration::MAX,
         },
-        Some(dt) => match (dt - Utc::now()).to_std().map(|d| d.as_secs()) {
+        Some(expiry_time) => match (expiry_time - Utc::now()).to_std().map(|d| d.as_secs()) {
             Ok(secs) if secs > 0 => State::Active {
                 remaining: Duration::from_secs(secs),
             },
@@ -82,27 +39,32 @@ fn get_state(backend: &Backend, selected_duration: Duration) -> State {
 
 async fn handle_command(
     cmd: InhibitCommand,
-    backend: &mut Backend,
+    client: &mut InhibitClient,
     durations: &[Duration],
     idx: &mut usize,
     tx: &impl AsyncSenderExt<ModuleUpdateEvent<State>>,
 ) -> Result<State> {
-    let current_state = get_state(backend, durations[*idx]);
+    let current_state = get_state(client, durations[*idx]);
+
     match (cmd, current_state) {
-        (InhibitCommand::Toggle, State::Active { .. }) => {
-            backend.stop().await.ok();
+        (InhibitCommand::Toggle(_), State::Active { .. }) => {
+            client.stop().await.ok();
         }
-        (InhibitCommand::Toggle, _) => {
-            backend.start(durations[*idx]).await.ok();
+        (InhibitCommand::Toggle(surface), _) => {
+            if let Some(surf) = surface {
+                client.start(durations[*idx], surf).await.ok();
+            }
         }
-        (InhibitCommand::Cycle, current) => {
+        (InhibitCommand::Cycle(surface), current) => {
             *idx = (*idx + 1) % durations.len();
             if matches!(current, State::Active { .. }) {
-                backend.start(durations[*idx]).await?;
+                if let Some(surf) = surface {
+                    client.start(durations[*idx], surf).await?;
+                }
             }
         }
     }
-    let new_state = get_state(backend, durations[*idx]);
+    let new_state = get_state(client, durations[*idx]);
     tx.send_update(new_state.clone()).await;
     Ok(new_state)
 }
@@ -122,27 +84,28 @@ impl Module<Button> for InhibitModule {
         let tx = ctx.tx.clone();
         let (duration_list, default_index) = self.durations.clone();
 
-        let backend_type = self.backend.expect("backend has default");
+        let backend_type = self.backend;
+
+        // Create inhibit client
+        let mut client = ctx.ironbar.clients.borrow_mut().inhibit(backend_type)?;
+
         spawn(async move {
-            let mut backend = create_backend(backend_type)
-                .await
-                .expect("Failed to create inhibit backend");
             let mut idx = default_index;
-            let mut state = get_state(&backend, duration_list[idx]);
+            let mut state = get_state(&client, duration_list[idx]);
             tx.send_update(state.clone()).await;
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             interval.tick().await;
             loop {
                 tokio::select! {
                     Some(cmd) = rx.recv() => {
-                        if let Ok(new_state) = handle_command(cmd, &mut backend, &duration_list, &mut idx, &tx).await {
+                        if let Ok(new_state) = handle_command(cmd, &mut client, &duration_list, &mut idx, &tx).await {
                             state = new_state;
                         }
                     }
                     _ = interval.tick() => {
-                        let new_state = get_state(&backend, duration_list[idx]);
+                        let new_state = get_state(&client, duration_list[idx]);
                         if matches!(new_state, State::Inactive { .. }) && !matches!(state, State::Inactive { .. }) {
-                            backend.stop().await.ok();
+                            client.stop().await.ok();
                         }
                         if state != new_state {
                             state = new_state.clone();
@@ -158,7 +121,7 @@ impl Module<Button> for InhibitModule {
     fn into_widget(
         self,
         ctx: WidgetContext<Self::SendMessage, Self::ReceiveMessage>,
-        _info: &ModuleInfo,
+        info: &ModuleInfo,
     ) -> Result<ModuleParts<Button>> {
         let button = Button::new();
         button.add_css_class("inhibit");
@@ -168,6 +131,8 @@ impl Module<Button> for InhibitModule {
             .build();
         button.set_child(Some(&label));
         let tx = ctx.controller_tx.clone();
+        let backend_type = self.backend;
+        let app = info.app.clone();
 
         // Bind mouse buttons to actions
         [
@@ -179,10 +144,43 @@ impl Module<Button> for InhibitModule {
         .filter_map(|(btn, cmd)| cmd.map(|c| (btn, c)))
         .for_each(|(btn, action)| {
             let tx = tx.clone();
+            let app_btn = app.clone();
+            let backend = backend_type;
+
             button.connect_pressed(btn, move || {
+                tracing::debug!("Inhibit button clicked: {:?}", btn);
+
+                // Get surface ID on GTK main thread
+                let surface_id = if backend == crate::clients::inhibit::BackendType::Wayland {
+                    match crate::clients::wayland::get_gtk_wayland_surface_id(&app_btn) {
+                        Ok(id) => {
+                            tracing::debug!("Got GTK Wayland surface ID: {:?}", id);
+                            Some(id)
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to get GTK Wayland surface ID: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    tracing::debug!("Using systemd backend, no surface needed");
+                    None
+                };
+
+                // Convert InhibitAction to InhibitCommand with surface ID
+                let command = match action {
+                    InhibitAction::Toggle => InhibitCommand::Toggle(surface_id),
+                    InhibitAction::Cycle => InhibitCommand::Cycle(surface_id),
+                };
+
+                tracing::debug!("Sending inhibit command: {:?}", std::mem::discriminant(&command));
                 let tx = tx.clone();
                 spawn(async move {
-                    tx.send(action).await.ok();
+                    if let Err(e) = tx.send(command).await {
+                        tracing::error!("Failed to send inhibit command: {}", e);
+                    } else {
+                        tracing::debug!("Inhibit command sent successfully");
+                    }
                 });
             });
         });
@@ -194,9 +192,20 @@ impl Module<Button> for InhibitModule {
                 State::Active { remaining } => (&format_on, remaining),
                 State::Inactive { selected_duration } => (&format_off, selected_duration),
             };
-            let duration_str = match duration {
-                Duration::MAX => format!("{:>7}", "∞"),
-                d => format!("{:>7}", humantime::format_duration(d)),
+            let duration_str = if duration == Duration::MAX {
+                format!("{:>7}", "∞")
+            } else {
+                let secs = duration.as_secs();
+                let h = secs / 3600;
+                let m = (secs % 3600) / 60;
+                let s = secs % 60;
+                if h > 0 {
+                    format!("{:>7}", format!("{:02}:{:02}:{:02}", h, m, s))
+                } else if m > 0 {
+                    format!("{:>7}", format!("{:02}:{:02}", m, s))
+                } else {
+                    format!("{:>7}", format!("{}s", s))
+                }
             };
             let text = format.replace("{duration}", &duration_str);
             label.set_label(&text);

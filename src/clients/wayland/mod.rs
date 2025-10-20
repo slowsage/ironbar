@@ -23,8 +23,23 @@ use smithay_client_toolkit::{
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, trace};
 use wayland_client::globals::registry_queue_init;
-use wayland_client::{Connection, QueueHandle};
+use wayland_client::{Connection, Proxy, QueueHandle};
 pub use wl_output::{OutputEvent, OutputEventType};
+cfg_if! {
+  if #[cfg(feature = "inhibit")] {
+    use chrono::{DateTime, Utc};
+    use wayland_client::protocol::wl_surface::WlSurface;
+    use wayland_protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
+    use wayland_protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1;
+
+    #[derive(Debug)]
+    struct InhibitState {
+      manager: ZwpIdleInhibitManagerV1,
+        inhibitor: Option<ZwpIdleInhibitorV1>,
+        expiry: Option<DateTime<Utc>>,
+      }
+  }
+}
 
 cfg_if! {
     if #[cfg(any(feature = "focused", feature = "launcher"))] {
@@ -56,6 +71,27 @@ cfg_if! {
     }
 }
 
+fn get_gtk_wayland_connection() -> Connection {
+    use gdk4_wayland::prelude::*;
+
+    let display = gtk::gdk::Display::default()
+        .expect("GTK Display not initialized");
+
+    let wl_display_gdk = display
+        .downcast::<gdk4_wayland::WaylandDisplay>()
+        .expect("Not a Wayland display");
+
+    let wl_display = wl_display_gdk
+        .wl_display()
+        .expect("Failed to get wl_display");
+
+    let backend = wl_display.backend()
+        .upgrade()
+        .expect("Backend destroyed");
+
+    Connection::from_backend(backend)
+}
+
 #[derive(Debug)]
 pub enum Event {
     Output(OutputEvent),
@@ -83,6 +119,13 @@ pub enum Request {
     CopyToClipboard(ClipboardItem),
     #[cfg(feature = "clipboard")]
     ClipboardItem,
+
+    #[cfg(feature = "inhibit")]
+    StartInhibit(std::time::Duration, wayland_client::backend::ObjectId),
+    #[cfg(feature = "inhibit")]
+    StopInhibit,
+    #[cfg(feature = "inhibit")]
+    GetInhibitExpiry,
 }
 
 #[derive(Debug)]
@@ -98,6 +141,9 @@ pub enum Response {
 
     #[cfg(feature = "clipboard")]
     ClipboardItem(Option<ClipboardItem>),
+
+    #[cfg(feature = "inhibit")]
+    InhibitExpiry(Option<DateTime<Utc>>),
 }
 
 #[derive(Debug)]
@@ -136,8 +182,11 @@ impl Client {
         #[cfg(feature = "clipboard")]
         let clipboard_channel = broadcast::channel(32);
 
+        // Get GTK's Wayland connection on main thread before spawn_blocking
+        let conn = get_gtk_wayland_connection();
+
         spawn_blocking(move || {
-            Environment::spawn(event_tx, request_rx, response_tx);
+            Environment::spawn(conn, event_tx, request_rx, response_tx);
         });
 
         // listen to events
@@ -186,10 +235,63 @@ impl Client {
     pub(crate) fn roundtrip(&self) -> Response {
         self.send_request(Request::Roundtrip)
     }
+
+    #[cfg(feature = "inhibit")]
+    pub fn start_inhibit(
+        &self,
+        duration: std::time::Duration,
+        surface_id: wayland_client::backend::ObjectId,
+    ) {
+        self.send_request(Request::StartInhibit(duration, surface_id));
+    }
+
+    #[cfg(feature = "inhibit")]
+    pub fn stop_inhibit(&self) {
+        self.send_request(Request::StopInhibit);
+    }
+
+    #[cfg(feature = "inhibit")]
+    pub fn inhibit_expiry(&self) -> Option<DateTime<Utc>> {
+        match self.send_request(Request::GetInhibitExpiry) {
+            Response::InhibitExpiry(expiry) => expiry,
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "inhibit")]
+/// Get GTK's Wayland surface ID for use with idle inhibit.
+/// Must be called from the GTK main thread.
+pub fn get_gtk_wayland_surface_id(
+    app: &gtk::Application,
+) -> color_eyre::Result<wayland_client::backend::ObjectId> {
+    use gdk4_wayland::WaylandSurface;
+    use gdk4_wayland::prelude::WaylandSurfaceExtManual;
+    use gtk::prelude::*;
+
+    let windows = app.windows();
+    let window = windows
+        .first()
+        .ok_or_else(|| color_eyre::eyre::eyre!("No windows available"))?;
+
+    let gdk_surface = window
+        .surface()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Window has no surface"))?;
+
+    let wayland_surface = gdk_surface
+        .downcast::<WaylandSurface>()
+        .map_err(|_| color_eyre::eyre::eyre!("Not a Wayland surface"))?;
+
+    let wl_surface = wayland_surface
+        .wl_surface()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Failed to get wl_surface"))?;
+
+    Ok(wl_surface.id())
 }
 
 #[derive(Debug)]
 pub struct Environment {
+    conn: Connection,
     registry_state: RegistryState,
     output_state: OutputState,
     seat_state: SeatState,
@@ -215,6 +317,10 @@ pub struct Environment {
     // local state
     #[cfg(feature = "clipboard")]
     clipboard: Arc<Mutex<Option<ClipboardItem>>>,
+
+    // -- inhibit --
+    #[cfg(feature = "inhibit")]
+    inhibit_state: Option<InhibitState>,
 }
 
 delegate_registry!(Environment);
@@ -238,20 +344,29 @@ cfg_if! {
     }
 }
 
+cfg_if! {
+    if #[cfg(feature = "inhibit")] {
+        use wayland_client::delegate_noop;
+
+        delegate_noop!(Environment: ZwpIdleInhibitManagerV1);
+        delegate_noop!(Environment: ZwpIdleInhibitorV1);
+    }
+}
+
 impl Environment {
     pub fn spawn(
+        conn: Connection,
         event_tx: mpsc::Sender<Event>,
         request_rx: calloop_channel::Channel<Request>,
         response_tx: std::sync::mpsc::Sender<Response>,
     ) {
-        let conn = Connection::connect_to_env().expect("Failed to connect to Wayland compositor");
         let (globals, queue) =
             registry_queue_init(&conn).expect("Failed to retrieve Wayland globals");
 
         let qh = queue.handle();
         let mut event_loop = EventLoop::<Self>::try_new().expect("Failed to create new event loop");
 
-        WaylandSource::new(conn, queue)
+        WaylandSource::new(conn.clone(), queue)
             .insert(event_loop.handle())
             .expect("Failed to insert Wayland event queue into event loop");
 
@@ -290,6 +405,7 @@ impl Environment {
         };
 
         let mut env = Self {
+            conn: conn.clone(),
             registry_state,
             output_state,
             seat_state,
@@ -307,6 +423,9 @@ impl Environment {
             copy_paste_sources: vec![],
             #[cfg(feature = "clipboard")]
             clipboard: arc_mut!(None),
+
+            #[cfg(feature = "inhibit")]
+            inhibit_state: None,
         };
 
         loop_handle
@@ -389,6 +508,95 @@ impl Environment {
                 let item = lock!(env.clipboard).clone();
                 env.response_tx.send_expect(Response::ClipboardItem(item));
             }
+
+            #[cfg(feature = "inhibit")]
+            Msg(Request::StartInhibit(duration, surface_id)) => {
+                use crate::clients::inhibit::calculate_expiry;
+
+                debug!(
+                    "StartInhibit received: duration={:?}, surface_id={:?}",
+                    duration, surface_id
+                );
+
+                // Initialize inhibit state on first call
+                if env.inhibit_state.is_none() {
+                    debug!("Initializing inhibit state (first call)");
+                    match env
+                        .registry_state
+                        .bind_one::<ZwpIdleInhibitManagerV1, _, _>(&env.queue_handle, 1..=1, ())
+                    {
+                        Ok(manager) => {
+                            debug!("Successfully bound idle inhibit manager");
+                            env.inhibit_state = Some(InhibitState {
+                                manager,
+                                inhibitor: None,
+                                expiry: None,
+                            });
+                        }
+                        Err(err) => {
+                            error!("Failed to bind idle inhibit manager: {:?}", err);
+                            env.response_tx.send_expect(Response::Ok);
+                            return;
+                        }
+                    }
+                }
+
+                if let Some(state) = &mut env.inhibit_state {
+                    debug!("Inhibit state exists, updating...");
+
+                    // Destroy existing inhibitor if any
+                    if let Some(inhibitor) = state.inhibitor.take() {
+                        debug!("Destroying existing inhibitor");
+                        inhibitor.destroy();
+                    }
+
+                    // Create WlSurface proxy from the ObjectId
+                    let surface = match WlSurface::from_id(&env.conn, surface_id) {
+                        Ok(surface) => surface,
+                        Err(err) => {
+                            error!("Failed to create surface proxy from id: {:?}", err);
+                            env.response_tx.send_expect(Response::Ok);
+                            return;
+                        }
+                    };
+
+                    // Create new inhibitor
+                    debug!("Creating new inhibitor on surface {:?}", surface.id());
+                    let inhibitor = state
+                        .manager
+                        .create_inhibitor(&surface, &env.queue_handle, ());
+                    debug!("Inhibitor created successfully");
+                    state.inhibitor = Some(inhibitor);
+                    state.expiry = calculate_expiry(duration);
+                    debug!("Expiry set to: {:?}", state.expiry);
+                }
+
+                debug!("StartInhibit completed, sending response");
+                env.response_tx.send_expect(Response::Ok);
+            }
+
+            #[cfg(feature = "inhibit")]
+            Msg(Request::StopInhibit) => {
+                debug!("StopInhibit received");
+                if let Some(state) = &mut env.inhibit_state {
+                    if let Some(inhibitor) = state.inhibitor.take() {
+                        debug!("Destroying inhibitor");
+                        inhibitor.destroy();
+                    }
+                    state.expiry = None;
+                    debug!("Inhibit stopped");
+                } else {
+                    debug!("No inhibit state to stop");
+                }
+                env.response_tx.send_expect(Response::Ok);
+            }
+
+            #[cfg(feature = "inhibit")]
+            Msg(Request::GetInhibitExpiry) => {
+                let expiry = env.inhibit_state.as_ref().and_then(|s| s.expiry);
+                env.response_tx.send_expect(Response::InhibitExpiry(expiry));
+            }
+
             calloop_channel::Event::Closed => error!("request channel unexpectedly closed"),
         }
     }

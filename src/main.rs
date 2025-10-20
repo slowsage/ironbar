@@ -166,14 +166,20 @@ impl Ironbar {
 
         // cannot use `oneshot` as `connect_activate` is not `FnOnce`.
         let (activate_tx, activate_rx) = mpsc::channel();
+        let (outputs_tx, outputs_rx) = mpsc::channel();
 
         let instance = Rc::new(self);
         let instance2 = instance.clone();
 
-        // force start wayland client ahead of ui
-        let wl = instance.clients.borrow_mut().wayland();
-        let mut rx_outputs = wl.subscribe_outputs();
-        wl.roundtrip();
+        // Initialize wayland client in startup signal (Display is ready)
+        let instance_startup = instance.clone();
+        app.connect_startup(move |_app| {
+            debug!("Startup signal - initializing wayland client");
+            let wl = instance_startup.clients.borrow_mut().wayland();
+            let rx_outputs = wl.subscribe_outputs();
+            outputs_tx.send_expect(rx_outputs);
+            wl.roundtrip();
+        });
 
         app.connect_activate(move |app| {
             if running.load(Ordering::Relaxed) {
@@ -241,6 +247,8 @@ impl Ironbar {
                 instance
                     .image_provider
                     .set_icon_theme(instance.config.borrow().icon_theme.as_deref());
+
+                let mut rx_outputs = outputs_rx.recv().expect("to receive outputs channel");
 
                 while let Ok(event) = rx_outputs.recv().await {
                     match event.event_type {
