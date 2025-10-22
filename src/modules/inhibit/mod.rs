@@ -7,11 +7,11 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::channels::{AsyncSenderExt, BroadcastReceiverExt};
-use crate::clients::{gtk_wayland, ProvidesClient};
-use wayland_client::protocol::wl_surface::WlSurface;
+use crate::clients::inhibit;
 use crate::gtk_helpers::{IronbarGtkExt, MouseButton};
 use crate::modules::{Module, ModuleInfo, ModuleParts, ModuleUpdateEvent, WidgetContext};
 use crate::{module_impl, spawn};
+use wayland_client::protocol::wl_surface::WlSurface;
 
 mod config;
 
@@ -52,8 +52,8 @@ pub enum State {
     Active { remaining: Duration },
 }
 
-fn get_state(client: &Arc<gtk_wayland::Client>, selected_duration: Duration) -> State {
-    match client.idle_inhibit().inhibit_expiry() {
+fn get_state(client: &Arc<inhibit::Client>, selected_duration: Duration) -> State {
+    match client.inhibit_expiry() {
         None => State::Inactive { selected_duration },
         Some(expiry_time) if expiry_time == chrono::DateTime::<Utc>::MAX_UTC => State::Active {
             remaining: Duration::MAX,
@@ -69,7 +69,7 @@ fn get_state(client: &Arc<gtk_wayland::Client>, selected_duration: Duration) -> 
 
 async fn handle_command(
     cmd: InhibitCommand,
-    client: &Arc<gtk_wayland::Client>,
+    client: &Arc<inhibit::Client>,
     durations: &[Duration],
     idx: &mut usize,
     tx: &impl AsyncSenderExt<ModuleUpdateEvent<State>>,
@@ -78,19 +78,15 @@ async fn handle_command(
 
     match (cmd, current_state) {
         (InhibitCommand::Toggle, State::Active { .. }) => {
-            client.idle_inhibit().stop()?;
+            client.stop_inhibit().await?;
         }
         (InhibitCommand::Toggle, _) => {
-            client
-                .idle_inhibit()
-                .set_idle_inhibit(true, durations[*idx])?;
+            client.start_inhibit(durations[*idx]).await?;
         }
         (InhibitCommand::Cycle, current) => {
             *idx = (*idx + 1) % durations.len();
             if matches!(current, State::Active { .. }) {
-                client
-                    .idle_inhibit()
-                    .set_idle_inhibit(true, durations[*idx])?;
+                client.start_inhibit(durations[*idx]).await?;
             }
         }
     }
@@ -115,8 +111,9 @@ impl Module<Button> for InhibitModule {
         let duration_list = self.durations.clone();
         let default_duration = self.default_duration;
 
-        // Get gtk_wayland client
-        let client: Arc<gtk_wayland::Client> = ctx.provide();
+        // Get inhibit client with backend
+        let backend = self.backend;
+        let client = ctx.ironbar.clients.borrow_mut().inhibit(backend)?;
 
         spawn(async move {
             let mut idx = duration_list
@@ -137,7 +134,7 @@ impl Module<Button> for InhibitModule {
                     _ = interval.tick() => {
                         let new_state = get_state(&client, duration_list[idx]);
                         if matches!(new_state, State::Inactive { .. }) && !matches!(state, State::Inactive { .. }) {
-                            client.idle_inhibit().stop().ok();
+                            client.stop_inhibit().await.ok();
                         }
                         if state != new_state {
                             state = new_state.clone();
@@ -164,14 +161,15 @@ impl Module<Button> for InhibitModule {
         button.set_child(Some(&label));
         let tx = ctx.controller_tx.clone();
 
-        // Initialize surface when button is realized
-        {
-            let client: Arc<gtk_wayland::Client> = ctx.provide();
+        // Initialize surface when button is realized (only for Wayland backend)
+        if matches!(self.backend, inhibit::BackendType::Wayland) {
+            use crate::clients::ProvidesClient;
+            let wayland_client: Arc<crate::clients::gtk_wayland::Client> = ctx.provide();
             button.connect_realize(move |btn| {
                 tracing::debug!("Button realized, initializing idle inhibit surface");
                 if let Some(wl_surface) = extract_wl_surface(btn) {
                     tracing::debug!("Got WlSurface, initializing idle inhibit manager");
-                    client.idle_inhibit().init_surface(wl_surface);
+                    wayland_client.idle_inhibit().init_surface(wl_surface);
                 } else {
                     tracing::error!("Failed to extract Wayland surface");
                 }

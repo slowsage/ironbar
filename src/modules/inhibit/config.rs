@@ -1,3 +1,4 @@
+use crate::clients::inhibit::BackendType;
 use crate::config::{CommonConfig, LayoutConfig};
 use chrono::Timelike;
 use serde::{Deserialize, Deserializer};
@@ -27,6 +28,13 @@ pub enum InhibitAction {
 #[cfg_attr(feature = "extras", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct InhibitModule {
+    /// Backend to use for idle inhibit.
+    ///
+    /// **Valid options**: `wayland`, `systemd`
+    /// <br>
+    /// **Default**: `wayland`
+    pub(super) backend: BackendType,
+
     /// List of durations to cycle through.
     /// Use `0` for infinite inhibit.
     /// Format: `HH:MM:SS` (e.g., `01:30:00` for 1 hour 30 minutes)
@@ -99,6 +107,7 @@ impl Default for InhibitModule {
         let default_duration = Duration::from_secs(120 * 60); // 02:00:00
 
         Self {
+            backend: BackendType::default(),
             durations: default_durations,
             default_duration,
             on_click_left: Some(InhibitAction::Toggle),

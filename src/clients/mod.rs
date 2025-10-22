@@ -18,6 +18,8 @@ pub mod clipboard;
 pub mod compositor;
 #[cfg(feature = "inhibit")]
 pub mod gtk_wayland;
+#[cfg(feature = "inhibit")]
+pub mod inhibit;
 #[cfg(feature = "keyboard")]
 pub mod libinput;
 #[cfg(feature = "cairo")]
@@ -28,6 +30,8 @@ pub mod music;
 pub mod networkmanager;
 #[cfg(feature = "sway")]
 pub mod sway;
+#[cfg(feature = "inhibit")]
+pub mod systemd;
 #[cfg(feature = "notifications")]
 pub mod swaync;
 #[cfg(feature = "sys_info")]
@@ -69,6 +73,10 @@ pub struct Clients {
     notifications: Option<Arc<swaync::Client>>,
     #[cfg(feature = "inhibit")]
     gtk_wayland: Option<Arc<gtk_wayland::Client>>,
+    #[cfg(feature = "inhibit")]
+    systemd: Option<Arc<systemd::Client>>,
+    #[cfg(feature = "inhibit")]
+    inhibit: Option<Arc<inhibit::Client>>,
     #[cfg(feature = "sys_info")]
     sys_info: Option<Arc<sysinfo::Client>>,
     #[cfg(feature = "tray")]
@@ -223,6 +231,37 @@ impl Clients {
         self.gtk_wayland
             .get_or_insert_with(|| Arc::new(gtk_wayland::Client::new()))
             .clone()
+    }
+
+    #[cfg(feature = "inhibit")]
+    pub fn systemd(&mut self) -> ClientResult<systemd::Client> {
+        if let Some(client) = &self.systemd {
+            Ok(client.clone())
+        } else {
+            let client = await_sync(async { systemd::Client::new().await })?;
+            let client = Arc::new(client);
+            self.systemd = Some(client.clone());
+            Ok(client)
+        }
+    }
+
+    #[cfg(feature = "inhibit")]
+    pub fn inhibit(
+        &mut self,
+        backend: inhibit::BackendType,
+    ) -> ClientResult<inhibit::Client> {
+        if let Some(client) = &self.inhibit {
+            Ok(client.clone())
+        } else {
+            let wayland_client = self.gtk_wayland();
+            let systemd_client = self.systemd().ok();
+            let client = await_sync(async {
+                inhibit::Client::new(backend, wayland_client, systemd_client).await
+            })?;
+            let client = Arc::new(client);
+            self.inhibit = Some(client.clone());
+            Ok(client)
+        }
     }
 
     #[cfg(feature = "sys_info")]
