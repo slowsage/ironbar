@@ -1,7 +1,7 @@
 use crate::gtk_helpers::IronbarLabelExt;
 use crate::image;
 use gtk::prelude::*;
-use gtk::{Button, ContentFit, Label, Orientation, Picture};
+use gtk::{Button, Image, Label, Orientation, Picture};
 use std::ops::Deref;
 
 #[derive(Debug, Clone)]
@@ -33,9 +33,7 @@ pub struct IconButton {
 impl IconButton {
     pub fn new(input: &str, size: i32, image_provider: image::Provider) -> Self {
         let button = Button::new();
-        let image = Picture::builder()
-            .content_fit(ContentFit::ScaleDown)
-            .build();
+        let image = Image::builder().build();
         let label = Label::builder().use_markup(true).build();
         label.set_label_escaped(input);
 
@@ -43,22 +41,34 @@ impl IconButton {
             image.add_css_class("image");
             image.add_css_class("icon");
 
-            let image = image.clone();
-            let label = label.clone();
-            let button = button.clone();
+            if input.starts_with("icon:") {
+                image.set_icon_name(Some(&input[5..]));
+                image.set_pixel_size(size);
+                button.set_child(Some(&image));
+            } else {
+                // For non-icon inputs (file://, http://), use Picture widget
+                let picture = Picture::builder()
+                    .content_fit(gtk::ContentFit::ScaleDown)
+                    .build();
+                picture.add_css_class("image");
+                picture.add_css_class("icon");
 
-            let input = input.to_string(); // ew
+                let label = label.clone();
+                let button = button.clone();
 
-            glib::spawn_future_local(async move {
-                if let Ok(true) = image_provider
-                    .load_into_picture(&input, size, false, &image)
-                    .await
-                {
-                    button.set_child(Some(&image));
-                } else {
-                    button.set_child(Some(&label));
-                }
-            });
+                let input = input.to_string(); // ew
+
+                glib::spawn_future_local(async move {
+                    if let Ok(true) = image_provider
+                        .load_into_picture(&input, size, false, &picture)
+                        .await
+                    {
+                        button.set_child(Some(&picture));
+                    } else {
+                        button.set_child(Some(&label));
+                    }
+                });
+            }
         } else {
             button.set_child(Some(&label));
         }
@@ -98,10 +108,9 @@ impl Deref for IconButton {
     feature = "workspaces",
 ))]
 pub struct IconLabel {
-    provider: image::Provider,
     container: gtk::Box,
     label: Label,
-    image: Picture,
+    image: Image,
 
     size: i32,
 }
@@ -122,9 +131,7 @@ impl IconLabel {
         label.add_css_class("icon");
         label.add_css_class("text-icon");
 
-        let image = Picture::builder()
-            .content_fit(ContentFit::ScaleDown)
-            .build();
+        let image = Image::builder().build();
         image.add_css_class("icon");
         image.add_css_class("image");
 
@@ -132,30 +139,43 @@ impl IconLabel {
         container.append(&label);
 
         if image::Provider::is_explicit_input(input) {
-            let image = image.clone();
-            let label = label.clone();
-            let image_provider = image_provider.clone();
+            if input.starts_with("icon:") {
+                image.set_icon_name(Some(&input[5..]));
+                image.set_pixel_size(size);
+                image.set_visible(true);
+            } else {
+                // For non-icon inputs (file://, http://), use Picture widget
+                let picture = Picture::builder()
+                    .content_fit(gtk::ContentFit::ScaleDown)
+                    .build();
+                picture.add_css_class("icon");
+                picture.add_css_class("image");
+                container.append(&picture);
+                picture.set_visible(false);
 
-            let input = input.to_string();
+                let label = label.clone();
+                let image_provider = image_provider.clone();
 
-            glib::spawn_future_local(async move {
-                let res = image_provider
-                    .load_into_picture(&input, size, false, &image)
-                    .await;
-                if matches!(res, Ok(true)) {
-                    image.set_visible(true);
-                } else {
-                    label.set_label_escaped(&input);
-                    label.set_visible(true);
-                }
-            });
+                let input = input.to_string();
+
+                glib::spawn_future_local(async move {
+                    let res = image_provider
+                        .load_into_picture(&input, size, false, &picture)
+                        .await;
+                    if matches!(res, Ok(true)) {
+                        picture.set_visible(true);
+                    } else {
+                        label.set_label_escaped(&input);
+                        label.set_visible(true);
+                    }
+                });
+            }
         } else {
             label.set_label_escaped(input);
             label.set_visible(true);
         }
 
         Self {
-            provider: image_provider.clone(),
             container,
             label,
             image,
@@ -169,27 +189,18 @@ impl IconLabel {
 
         if let Some(input) = input {
             if image::Provider::is_explicit_input(input) {
-                let provider = self.provider.clone();
-                let size = self.size;
-
-                let label = label.clone();
-                let image = image.clone();
-                let input = input.to_string();
-
-                glib::spawn_future_local(async move {
-                    let res = provider
-                        .load_into_picture(&input, size, false, &image)
-                        .await;
-                    if matches!(res, Ok(true)) {
-                        label.set_visible(false);
-                        image.set_visible(true);
-                    } else {
-                        label.set_label_escaped(&input);
-
-                        image.set_visible(false);
-                        label.set_visible(true);
-                    }
-                });
+                if input.starts_with("icon:") {
+                    image.set_icon_name(Some(&input[5..]));
+                    image.set_pixel_size(self.size);
+                    label.set_visible(false);
+                    image.set_visible(true);
+                } else {
+                    // For non-icon explicit inputs (file://, http://),
+                    // fall back to showing text label since we can't create Picture dynamically
+                    label.set_label_escaped(input);
+                    image.set_visible(false);
+                    label.set_visible(true);
+                }
             } else {
                 label.set_label_escaped(input);
 
