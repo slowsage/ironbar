@@ -1,0 +1,71 @@
+name: 'Rust Auto-Dependency Installer'
+description: 'Automatically finds and installs system dependencies for a Rust project on Ubuntu runners by running cargo check in a loop.'
+
+runs:
+  using: 'composite' # Specifies that this is a composite action
+  steps:
+    - name: Auto-install System Dependencies
+      shell: bash
+      run: |
+        #!/bin/bash
+        echo "--- Starting automatic dependency installation ---"
+
+        # Install apt-file and update its cache
+        sudo apt-get update
+        sudo apt-get install -y apt-file
+        sudo apt-file update
+
+        MAX_TRIES=15
+        for ((i=1; i<=MAX_TRIES; i++)); do
+            echo ""
+            echo "--- Attempt #$i: Running 'cargo check' ---"
+
+            build_output=$(cargo check 2>&1)
+            build_exit_code=$?
+
+            if [ $build_exit_code -eq 0 ]; then
+                echo "✅ 'cargo check' succeeded."
+                exit 0
+            fi
+
+            echo "$build_output"
+            echo "--- Build failed. Analyzing output... ---"
+
+            missing_pkg=""
+            install_pkg=""
+
+            # Pattern 1: pkg-config errors
+            if echo "$build_output" | grep -q "Package .* not found"; then
+                missing_pkg=$(echo "$build_output" | grep "Package .* not found" | sed -n "s/.*Package '\(.*\)' not found.*/\1/p" | head -n 1)
+                if [ -n "$missing_pkg" ]; then
+                    install_pkg="lib${missing_pkg}-dev"
+                    echo "Found missing pkg-config package: '$missing_pkg'. Guessing APT package is '$install_pkg'."
+                fi
+            # Pattern 2: linker errors
+            elif echo "$build_output" | grep -q "cannot find -l"; then
+                missing_lib=$(echo "$build_output" | grep "cannot find -l" | sed -n "s/.*cannot find -l\(.*\)/\1/p" | head -n 1 | tr -d "'")
+                if [ -n "$missing_lib" ]; then
+                    echo "Found missing linker library: '-l$missing_lib'. Searching with apt-file..."
+                    install_pkg=$(apt-file search "lib${missing_lib}.so" | grep -- '-dev:' | head -n 1 | cut -d: -f1 || apt-file search "lib${missing_lib}.so" | head -n 1 | cut -d: -f1)
+                    if [ -n "$install_pkg" ]; then
+                        echo "apt-file suggests package: '$install_pkg'."
+                    fi
+                fi
+            fi
+
+            if [ -z "$install_pkg" ]; then
+                echo "❌ Could not automatically determine which package to install."
+                exit 1
+            fi
+
+            echo "Attempting to install '$install_pkg'..."
+            if sudo apt-get install -y "$install_pkg"; then
+                echo "--- Successfully installed '$install_pkg'. Retrying build... ---"
+            else
+                echo "❌ Failed to install '$install_pkg'."
+                exit 1
+            fi
+        done
+
+        echo "❌ Reached max retries ($MAX_TRIES) and could not resolve build errors."
+        exit 1
