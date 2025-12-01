@@ -3,10 +3,13 @@ use crate::clients::ClientResult;
 use crate::{arc_mut, lock, register_fallible_client, spawn};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use system_tray::client::{ActivateRequest, Client as TrayClient, Event, UpdateEvent};
 use system_tray::data::BaseMap;
 use system_tray::menu::TrayMenu;
 use tokio::sync::broadcast;
+use tokio::time::sleep;
+use tracing::warn;
 
 #[derive(Debug)]
 struct MenuCache {
@@ -25,7 +28,28 @@ pub struct Client {
 
 impl Client {
     pub async fn new() -> ClientResult<Self> {
-        let client = TrayClient::new().await?;
+        // Retry with backoff to handle transient DBus errors on restart (#1016)
+        const MAX_ATTEMPTS: u32 = 5;
+        const BASE_DELAY_MS: u64 = 100;
+
+        let client = {
+            let mut attempts = 0;
+            loop {
+                attempts += 1;
+                match TrayClient::new().await {
+                    Ok(client) => break client,
+                    Err(e) if attempts < MAX_ATTEMPTS => {
+                        let delay = BASE_DELAY_MS * 2u64.pow(attempts - 1);
+                        warn!(
+                            "Tray client init failed (attempt {}/{}): {}. Retrying in {}ms...",
+                            attempts, MAX_ATTEMPTS, e, delay
+                        );
+                        sleep(Duration::from_millis(delay)).await;
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        };
 
         let (tx, rx) = broadcast::channel(16);
         let menus = arc_mut!(HashMap::new());
