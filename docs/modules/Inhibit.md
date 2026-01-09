@@ -107,6 +107,13 @@ end:
 | ------------ | ----------------- |
 | `{duration}` | Current duration. |
 
+## Ironvars
+
+| Name           | Mode         | Description                                                          |
+| -------------- | ------------ | -------------------------------------------------------------------- |
+| `inhibit_cmd`  | **Write**    | Set to `toggle` or `cycle` to trigger the corresponding action.      |
+| `inhibit_info` | **Read**     | Current status as JSON: `{"status": "active", "remaining": "HH:MM:SS"}` |
+
 ## Styling
 
 | Selector   | Description           |

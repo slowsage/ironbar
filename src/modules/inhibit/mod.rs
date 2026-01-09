@@ -11,8 +11,10 @@ use crate::clients::inhibit;
 use crate::gtk_helpers::{IronbarGtkExt, IronbarLabelExt, MouseButton};
 use crate::modules::{Module, ModuleInfo, ModuleParts, WidgetContext};
 use crate::{module_impl, spawn};
+use tokio::sync::broadcast;
 
 mod config;
+mod ipc;
 
 use config::InhibitCommand;
 pub use config::InhibitModule;
@@ -48,6 +50,7 @@ impl Module<Button> for InhibitModule {
         mut rx: Receiver<Self::ReceiveMessage>,
     ) -> Result<()> {
         let tx = ctx.tx.clone();
+        let controller_tx = ctx.controller_tx.clone();
         let durations = self.duration_spec.durations.clone();
         let default = self.duration_spec.default_duration;
 
@@ -60,6 +63,10 @@ impl Module<Button> for InhibitModule {
             };
             tx.send_update(state).await;
 
+            let (state_tx, state_rx) = broadcast::channel(32);
+            state_tx.send(state).ok();
+            ipc::start(controller_tx, state_rx);
+
             loop {
                 tokio::select! {
                     Some(cmd) = rx.recv() => {
@@ -70,6 +77,7 @@ impl Module<Button> for InhibitModule {
                         state.duration = durations[idx];
                         trace!("Inhibit state update: active={}, duration={}", state.active, format_duration(state.duration));
                         tx.send_update(state).await;
+                        state_tx.send(state).ok();
                     }
                     _ = tokio::time::sleep(Duration::from_secs(1)), if state.active && state.duration != Duration::MAX => {
                         state.duration = state.duration.saturating_sub(Duration::from_secs(1));
@@ -78,6 +86,7 @@ impl Module<Button> for InhibitModule {
                             state.duration = durations[idx];
                         }
                         tx.send_update(state).await;
+                        state_tx.send(state).ok();
                     }
                 }
             }
