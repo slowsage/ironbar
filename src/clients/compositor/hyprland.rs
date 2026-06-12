@@ -4,16 +4,15 @@ use super::{BindModeClient, BindModeUpdate};
 use super::{KeyboardLayoutClient, KeyboardLayoutUpdate};
 use super::{Visibility, Workspace};
 use crate::channels::SyncSenderExt;
-use crate::{arc_mut, lock, spawn_blocking};
-use hyprland::Result;
-use hyprland::ctl::switch_xkb_layout;
-use hyprland::data::{Devices, Workspace as HWorkspace, Workspaces};
-use hyprland::dispatch::{Dispatch, DispatchType, WorkspaceIdentifierWithSpecial};
-use hyprland::event_listener::EventListener;
-use hyprland::prelude::*;
-use hyprland::shared::{HyprDataVec, WorkspaceType};
+use crate::spawn_blocking;
+use color_eyre::Result;
+use serde::Deserialize;
+use std::env;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use tokio::sync::broadcast::{Receiver, Sender, channel};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 #[cfg(feature = "workspaces")]
 use super::WorkspaceUpdate;
@@ -57,303 +56,91 @@ impl Client {
         instance
     }
 
+    /// Reads the Hyprland event socket (`.socket2.sock`) and forwards each
+    /// event to the relevant module channel.
     fn listen_events(&self) {
         info!("Starting Hyprland event listener");
 
         #[cfg(feature = "workspaces+hyprland")]
         let workspace_tx = self.workspace.tx.clone();
-
         #[cfg(feature = "keyboard+hyprland")]
         let keyboard_layout_tx = self.keyboard_layout.tx.clone();
-
         #[cfg(feature = "bindmode+hyprland")]
         let bindmode_tx = self.bindmode.tx.clone();
 
         spawn_blocking(move || {
-            let mut event_listener = EventListener::new();
-
-            // we need a lock to ensure events don't run at the same time
-            let lock = arc_mut!(());
+            let stream = match UnixStream::connect(socket_path(".socket2.sock")) {
+                Ok(stream) => stream,
+                Err(err) => return error!("Failed to connect to Hyprland event socket: {err:#}"),
+            };
 
             // cache the active workspace since Hyprland doesn't give us the prev active
             #[cfg(feature = "workspaces+hyprland")]
-            Self::listen_workspace_events(&workspace_tx, &mut event_listener, &lock);
+            let mut active = Self::get_active_workspace()
+                .map_err(|err| error!("Failed to get active workspace: {err:#}"))
+                .ok();
 
-            #[cfg(feature = "keyboard+hyprland")]
-            Self::listen_keyboard_events(&keyboard_layout_tx, &mut event_listener, &lock);
-
-            #[cfg(feature = "bindmode+hyprland")]
-            Self::listen_bindmode_events(&bindmode_tx, &mut event_listener, &lock);
-
-            if let Err(err) = event_listener.start_listener() {
-                error!("Failed to start listener: {err:#}");
-            }
-        });
-    }
-
-    #[cfg(feature = "workspaces+hyprland")]
-    fn listen_workspace_events(
-        tx: &Sender<WorkspaceUpdate>,
-        event_listener: &mut EventListener,
-        lock: &std::sync::Arc<std::sync::Mutex<()>>,
-    ) {
-        let active = Self::get_active_workspace().map_or_else(
-            |err| {
-                error!("Failed to get active workspace: {err:#?}");
-                None
-            },
-            Some,
-        );
-        let active = arc_mut!(active);
-
-        {
-            let tx = tx.clone();
-            let lock = lock.clone();
-            let active = active.clone();
-
-            event_listener.add_workspace_added_handler(move |event| {
-                let _lock = lock!(lock);
-                debug!("Added workspace: {event:?}");
-
-                let workspace_name = get_workspace_name(event.name);
-                let prev_workspace = lock!(active);
-
-                let workspace = Self::get_workspace(&workspace_name, prev_workspace.as_ref());
-
-                match workspace {
-                    Ok(Some(workspace)) => {
-                        tx.send_expect(WorkspaceUpdate::Add(workspace));
-                    }
-                    Err(e) => error!("Failed to get workspace: {e:#}"),
-                    _ => {}
-                }
-            });
-        }
-
-        {
-            let tx = tx.clone();
-            let lock = lock.clone();
-            let active = active.clone();
-
-            event_listener.add_workspace_changed_handler(move |event| {
-                let _lock = lock!(lock);
-
-                let mut prev_workspace = lock!(active);
-
-                debug!(
-                    "Received workspace change: {:?} -> {event:?}",
-                    prev_workspace.as_ref().map(|w| &w.id)
-                );
-
-                let workspace_name = get_workspace_name(event.name);
-                let workspace = Self::get_workspace(&workspace_name, prev_workspace.as_ref());
-
-                match workspace {
-                    Ok(Some(workspace)) if !workspace.visibility.is_focused() => {
-                        Self::send_focus_change(&mut prev_workspace, workspace, &tx);
-                    }
-                    Ok(None) => {
-                        error!("Unable to locate workspace");
-                    }
-                    Err(e) => error!("Failed to get workspace: {e:#}"),
-                    _ => {}
-                }
-            });
-        }
-
-        {
-            let tx = tx.clone();
-            let lock = lock.clone();
-            let active = active.clone();
-
-            event_listener.add_active_monitor_changed_handler(move |event_data| {
-                let _lock = lock!(lock);
-                let Some(workspace_type) = event_data.workspace_name else {
-                    warn!("Received active monitor change with no workspace name");
-                    return;
+            for line in BufReader::new(stream).lines() {
+                let Ok(line) = line.map_err(|err| error!("Event socket read failed: {err:#}"))
+                else {
+                    break;
                 };
+                let Some((event, data)) = line.split_once(">>") else {
+                    continue;
+                };
+                debug!("Received event: {event} >> {data}");
 
-                let mut prev_workspace = lock!(active);
-
-                debug!(
-                    "Received active monitor change: {:?} -> {workspace_type:?}",
-                    prev_workspace.as_ref().map(|w| &w.name)
-                );
-
-                let workspace_name = get_workspace_name(workspace_type);
-                let workspace = Self::get_workspace(&workspace_name, prev_workspace.as_ref());
-
-                match workspace {
-                    Ok(Some(workspace)) if !workspace.visibility.is_focused() => {
-                        Self::send_focus_change(&mut prev_workspace, workspace, &tx);
-                    }
-                    Ok(None) => {
-                        error!("Unable to locate workspace");
-                    }
-                    Err(e) => error!("Failed to get workspace: {e:#}"),
-                    _ => {}
-                }
-            });
-        }
-
-        {
-            let tx = tx.clone();
-            let lock = lock.clone();
-
-            event_listener.add_workspace_moved_handler(move |event_data| {
-                let _lock = lock!(lock);
-                let workspace_type = event_data.name;
-
-                let mut prev_workspace = lock!(active);
-                debug!(
-                    "Received workspace move: {:?} -> {workspace_type:?}",
-                    prev_workspace.as_ref().map(|w| &w.name)
-                );
-
-                let workspace_name = get_workspace_name(workspace_type);
-                let workspace = Self::get_workspace(&workspace_name, prev_workspace.as_ref());
-
-                match workspace {
-                    Ok(Some(workspace)) => {
-                        tx.send_expect(WorkspaceUpdate::Move(workspace.clone()));
-                        if !workspace.visibility.is_focused() {
-                            Self::send_focus_change(&mut prev_workspace, workspace, &tx);
+                match event {
+                    // both carry the newly focused workspace name in the last field
+                    #[cfg(feature = "workspaces+hyprland")]
+                    "workspacev2" | "focusedmon" => {
+                        if let Some(ws) = Self::get_workspace(field(data, 1, 2), active.as_ref())
+                            && !ws.visibility.is_focused()
+                        {
+                            Self::send_focus_change(&mut active, ws, &workspace_tx);
                         }
                     }
-                    Ok(None) => {
-                        error!("Unable to locate workspace");
+                    #[cfg(feature = "workspaces+hyprland")]
+                    "createworkspacev2" => {
+                        if let Some(ws) = Self::get_workspace(field(data, 1, 2), active.as_ref()) {
+                            workspace_tx.send_expect(WorkspaceUpdate::Add(ws));
+                        }
                     }
-                    Err(e) => error!("Failed to get workspace: {e:#}"),
+                    #[cfg(feature = "workspaces+hyprland")]
+                    "moveworkspacev2" => {
+                        if let Some(ws) = Self::get_workspace(field(data, 1, 3), active.as_ref()) {
+                            workspace_tx.send_expect(WorkspaceUpdate::Move(ws.clone()));
+                            if !ws.visibility.is_focused() {
+                                Self::send_focus_change(&mut active, ws, &workspace_tx);
+                            }
+                        }
+                    }
+                    #[cfg(feature = "workspaces+hyprland")]
+                    "renameworkspace" | "destroyworkspacev2" => {
+                        if let Ok(id) = field(data, 0, 2).parse() {
+                            workspace_tx.send_expect(if event == "renameworkspace" {
+                                WorkspaceUpdate::Rename {
+                                    id,
+                                    name: field(data, 1, 2).to_string(),
+                                }
+                            } else {
+                                WorkspaceUpdate::Remove(id)
+                            });
+                        }
+                    }
+                    #[cfg(feature = "workspaces+hyprland")]
+                    "urgent" => Self::send_urgent(&format!("0x{data}"), &workspace_tx),
+                    #[cfg(feature = "keyboard+hyprland")]
+                    "activelayout" => keyboard_layout_tx
+                        .send_expect(KeyboardLayoutUpdate(field(data, 1, 2).to_string())),
+                    #[cfg(feature = "bindmode+hyprland")]
+                    "submap" => bindmode_tx.send_expect(BindModeUpdate {
+                        name: data.to_string(),
+                        pango_markup: false,
+                    }),
+                    _ => {}
                 }
-            });
-        }
-
-        {
-            let tx = tx.clone();
-            let lock = lock.clone();
-
-            event_listener.add_workspace_renamed_handler(move |data| {
-                let _lock = lock!(lock);
-                debug!("Received workspace rename: {data:?}");
-
-                tx.send_expect(WorkspaceUpdate::Rename {
-                    id: data.id as i64,
-                    name: data.name,
-                });
-            });
-        }
-
-        {
-            let tx = tx.clone();
-            let lock = lock.clone();
-
-            event_listener.add_workspace_deleted_handler(move |data| {
-                let _lock = lock!(lock);
-                debug!("Received workspace destroy: {data:?}");
-                tx.send_expect(WorkspaceUpdate::Remove(data.id as i64));
-            });
-        }
-
-        {
-            let tx = tx.clone();
-            let lock = lock.clone();
-
-            event_listener.add_urgent_state_changed_handler(move |address| {
-                let _lock = lock!(lock);
-                debug!("Received urgent state: {address:?}");
-
-                let clients = match hyprland::data::Clients::get() {
-                    Ok(clients) => clients,
-                    Err(err) => {
-                        error!("Failed to get clients: {err}");
-                        return;
-                    }
-                };
-                clients.iter().find(|c| c.address == address).map_or_else(
-                    || {
-                        error!("Unable to locate client");
-                    },
-                    |c| {
-                        tx.send_expect(WorkspaceUpdate::Urgent {
-                            id: c.workspace.id as i64,
-                            urgent: true,
-                        });
-                    },
-                );
-            });
-        }
-    }
-
-    #[cfg(feature = "keyboard+hyprland")]
-    fn listen_keyboard_events(
-        keyboard_layout_tx: &Sender<KeyboardLayoutUpdate>,
-        event_listener: &mut EventListener,
-        lock: &std::sync::Arc<std::sync::Mutex<()>>,
-    ) {
-        let tx = keyboard_layout_tx.clone();
-        let lock = lock.clone();
-
-        event_listener.add_layout_changed_handler(move |layout_event| {
-            let _lock = lock!(lock);
-
-            let layout = if layout_event.layout_name.is_empty() {
-                // FIXME: This field is empty due to bug in `hyprland-rs_0.4.0-alpha.3`. Which is already fixed in last betas
-
-                // The layout may be empty due to a bug in `hyprland-rs`, because of which the `layout_event` is incorrect.
-                //
-                // Instead of:
-                // ```
-                // LayoutEvent {
-                //     keyboard_name: "keychron-keychron-c2",
-                //     layout_name: "English (US)",
-                // }
-                // ```
-                //
-                // We get:
-                // ```
-                // LayoutEvent {
-                //     keyboard_name: "keychron-keychron-c2,English (US)",
-                //     layout_name: "",
-                // }
-                // ```
-                // 
-                // Here we are trying to recover `layout_name` from `keyboard_name`
-
-                let layout = layout_event.keyboard_name.as_str().split(',').nth(1);
-                let Some(layout) = layout else {
-                    error!(
-                        "Failed to get layout from string: {}. The failed logic is a workaround for a bug in `hyprland 0.4.0-alpha.3`", layout_event.keyboard_name);
-                    return;
-                };
-
-                layout.into()
             }
-            else {
-                layout_event.layout_name
-            };
-
-            debug!("Received layout: {layout:?}");
-            tx.send_expect(KeyboardLayoutUpdate(layout));
-        });
-    }
-
-    #[cfg(feature = "bindmode+hyprland")]
-    fn listen_bindmode_events(
-        bindmode_tx: &Sender<BindModeUpdate>,
-        event_listener: &mut EventListener,
-        lock: &std::sync::Arc<std::sync::Mutex<()>>,
-    ) {
-        let tx = bindmode_tx.clone();
-        let lock = lock.clone();
-
-        event_listener.add_sub_map_changed_handler(move |bind_mode| {
-            let _lock = lock!(lock);
-            debug!("Received bind mode: {bind_mode:?}");
-
-            tx.send_expect(BindModeUpdate {
-                name: bind_mode,
-                pango_markup: false,
-            });
         });
     }
 
@@ -369,73 +156,102 @@ impl Client {
             old: prev_workspace.take(),
             new: workspace.clone(),
         });
-
         tx.send_expect(WorkspaceUpdate::Urgent {
             id: workspace.id,
             urgent: false,
         });
-
         prev_workspace.replace(workspace);
     }
 
-    /// Gets a workspace by name from the server, given the active workspace if known.
+    /// Resolves the window `address` to its workspace and flags it urgent.
     #[cfg(feature = "workspaces+hyprland")]
-    fn get_workspace(name: &str, active: Option<&Workspace>) -> Result<Option<Workspace>> {
-        let workspace = Workspaces::get()?.into_iter().find_map(|w| {
-            if w.name == name {
-                let vis = Visibility::from((&w, active.map(|w| w.name.as_ref()), &|w| {
-                    create_is_visible()(w)
-                }));
+    fn send_urgent(address: &str, tx: &Sender<WorkspaceUpdate>) {
+        match request_json::<Vec<HClient>>("j/clients") {
+            Ok(clients) => match clients.into_iter().find(|c| c.address == address) {
+                Some(client) => tx.send_expect(WorkspaceUpdate::Urgent {
+                    id: client.workspace.id,
+                    urgent: true,
+                }),
+                None => error!("Unable to locate client"),
+            },
+            Err(err) => error!("Failed to get clients: {err:#}"),
+        }
+    }
 
-                Some(Workspace::from((vis, w)))
-            } else {
+    /// Gets a workspace by name from the server, logging on failure.
+    #[cfg(feature = "workspaces+hyprland")]
+    fn get_workspace(name: &str, active: Option<&Workspace>) -> Option<Workspace> {
+        match Self::get_workspaces(active.map(|w| w.name.as_str())) {
+            Ok(workspaces) => {
+                let workspace = workspaces.into_iter().find(|w| w.name == name);
+                if workspace.is_none() {
+                    error!("Unable to locate workspace");
+                }
+                workspace
+            }
+            Err(err) => {
+                error!("Failed to get workspace: {err:#}");
                 None
             }
-        });
+        }
+    }
 
-        Ok(workspace)
+    /// Gets all workspaces from the server,
+    /// with visibility computed against the active workspace name.
+    #[cfg(feature = "workspaces+hyprland")]
+    fn get_workspaces(active: Option<&str>) -> Result<Vec<Workspace>> {
+        let monitors = request_json::<Vec<HMonitor>>("j/monitors")?;
+
+        let workspaces = request_json::<Vec<HWorkspace>>("j/workspaces")?
+            .into_iter()
+            .map(|w| {
+                let visibility = if Some(w.name.as_str()) == active {
+                    Visibility::focused()
+                } else if monitors.iter().any(|m| m.active_workspace.id == w.id) {
+                    Visibility::visible()
+                } else {
+                    Visibility::Hidden
+                };
+                Workspace::from((visibility, w))
+            })
+            .collect();
+
+        Ok(workspaces)
     }
 
     /// Gets the active workspace from the server.
+    #[cfg(feature = "workspaces+hyprland")]
     fn get_active_workspace() -> Result<Workspace> {
-        let w = HWorkspace::get_active().map(|w| Workspace::from((Visibility::focused(), w)))?;
-        Ok(w)
+        let workspace = request_json::<HWorkspace>("j/activeworkspace")?;
+        Ok(Workspace::from((Visibility::focused(), workspace)))
     }
 }
 
 #[cfg(feature = "workspaces+hyprland")]
 impl super::WorkspaceClient for Client {
     fn focus(&self, id: i64) {
-        let identifier = WorkspaceIdentifierWithSpecial::Id(id as i32);
-
-        if let Err(e) = Dispatch::call(DispatchType::Workspace(identifier)) {
-            error!("Couldn't focus workspace '{id}': {e:#}");
+        // Requires Hyprland's lua config (0.55+); the legacy `.conf` dispatch
+        // syntax (`dispatch workspace <id>`) is not supported.
+        let command = format!("dispatch hl.dsp.focus({{ workspace = \"{id}\" }})");
+        match request(&command) {
+            Ok(reply) if !reply.starts_with("ok") => {
+                error!("dispatch '{command}' rejected: {reply}");
+            }
+            Err(err) => error!("dispatch '{command}' failed: {err:#}"),
+            _ => {}
         }
     }
 
     fn subscribe(&self) -> Receiver<WorkspaceUpdate> {
         let rx = self.workspace.tx.subscribe();
 
-        let active_id = HWorkspace::get_active().ok().map(|active| active.name);
-        let is_visible = create_is_visible();
-
-        match Workspaces::get() {
-            Ok(workspaces) => {
-                let workspaces = workspaces
-                    .into_iter()
-                    .map(|w| {
-                        let vis = Visibility::from((&w, active_id.as_deref(), &is_visible));
-                        Workspace::from((vis, w))
-                    })
-                    .collect();
-
-                self.workspace
-                    .tx
-                    .send_expect(WorkspaceUpdate::Init(workspaces));
-            }
-            Err(e) => {
-                error!("Failed to get workspaces: {e:#}");
-            }
+        let active = Self::get_active_workspace().ok().map(|w| w.name);
+        match Self::get_workspaces(active.as_deref()) {
+            Ok(workspaces) => self
+                .workspace
+                .tx
+                .send_expect(WorkspaceUpdate::Init(workspaces)),
+            Err(err) => error!("Failed to get workspaces: {err:#}"),
         }
 
         rx
@@ -445,45 +261,20 @@ impl super::WorkspaceClient for Client {
 #[cfg(feature = "keyboard+hyprland")]
 impl KeyboardLayoutClient for Client {
     fn set_next_active(&self) {
-        let Ok(devices) = Devices::get() else {
-            error!("Failed to get devices");
-            return;
-        };
-
-        let device = devices
-            .keyboards
-            .iter()
-            .find(|k| k.main)
-            .map(|k| k.name.clone());
-
-        if let Some(device) = device {
-            if let Err(e) =
-                switch_xkb_layout::call(device, switch_xkb_layout::SwitchXKBLayoutCmdTypes::Next)
-            {
-                error!("Failed to switch keyboard layout due to Hyprland error: {e}");
-            }
-        } else {
-            error!("Failed to get keyboard device from hyprland");
+        if let Some(keyboard) = main_keyboard()
+            && let Err(err) = request(&format!("switchxkblayout {} next", keyboard.name))
+        {
+            error!("Failed to switch keyboard layout: {err:#}");
         }
     }
 
     fn subscribe(&self) -> Receiver<KeyboardLayoutUpdate> {
         let rx = self.keyboard_layout.tx.subscribe();
 
-        match Devices::get().map(|devices| {
-            devices
-                .keyboards
-                .iter()
-                .find(|k| k.main)
-                .map(|k| k.active_keymap.clone())
-        }) {
-            Ok(Some(layout)) => {
-                self.keyboard_layout
-                    .tx
-                    .send_expect(KeyboardLayoutUpdate(layout));
-            }
-            Ok(None) => error!("Failed to get current keyboard layout hyprland"),
-            Err(err) => error!("Failed to get devices: {err:#?}"),
+        if let Some(keyboard) = main_keyboard() {
+            self.keyboard_layout
+                .tx
+                .send_expect(KeyboardLayoutUpdate(keyboard.active_keymap));
         }
 
         rx
@@ -497,47 +288,114 @@ impl BindModeClient for Client {
     }
 }
 
-fn get_workspace_name(name: WorkspaceType) -> String {
-    match name {
-        WorkspaceType::Regular(name) => name,
-        WorkspaceType::Special(name) => name.unwrap_or_default(),
-    }
+/// Path to a Hyprland IPC socket for the current instance.
+fn socket_path(name: &str) -> PathBuf {
+    let signature = env::var("HYPRLAND_INSTANCE_SIGNATURE").unwrap_or_default();
+    env::var("XDG_RUNTIME_DIR")
+        .map(|dir| PathBuf::from(dir).join("hypr").join(&signature))
+        .ok()
+        .filter(|dir| dir.exists())
+        .unwrap_or_else(|| PathBuf::from("/tmp/hypr").join(&signature))
+        .join(name)
 }
 
-/// Creates a function which determines if a workspace is visible.
-///
-/// This function makes a Hyprland call that allocates so it should be cached when possible,
-/// but it is only valid so long as workspaces do not change so it should not be stored long term
-fn create_is_visible() -> impl Fn(&HWorkspace) -> bool {
-    let monitors = hyprland::data::Monitors::get().map_or(Vec::new(), HyprDataVec::to_vec);
+/// Sends a command over the request socket (`.socket.sock`) and returns the reply.
+#[cfg(any(feature = "workspaces+hyprland", feature = "keyboard+hyprland"))]
+fn request(command: &str) -> Result<String> {
+    let mut stream = UnixStream::connect(socket_path(".socket.sock"))?;
+    stream.write_all(command.as_bytes())?;
 
-    move |w| monitors.iter().any(|m| m.active_workspace.id == w.id)
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply)?;
+    Ok(reply)
 }
 
-impl From<(Visibility, HWorkspace)> for Workspace {
-    fn from((visibility, workspace): (Visibility, HWorkspace)) -> Self {
-        Self {
-            id: workspace.id as i64,
-            index: workspace.id as i64,
-            name: workspace.name,
-            monitor: workspace.monitor,
-            visibility,
+/// Sends a `j/`-prefixed command and deserializes the JSON reply.
+#[cfg(any(feature = "workspaces+hyprland", feature = "keyboard+hyprland"))]
+fn request_json<T: serde::de::DeserializeOwned>(command: &str) -> Result<T> {
+    Ok(serde_json::from_str(&request(command)?)?)
+}
+
+/// Gets the `index`th of `count` comma-separated event fields,
+/// keeping any extra commas in the final field.
+#[cfg(any(feature = "workspaces+hyprland", feature = "keyboard+hyprland"))]
+fn field(data: &str, index: usize, count: usize) -> &str {
+    data.splitn(count, ',').nth(index).unwrap_or_default()
+}
+
+/// Gets the main keyboard from the server, logging on failure.
+#[cfg(feature = "keyboard+hyprland")]
+fn main_keyboard() -> Option<HKeyboard> {
+    match request_json::<HDevices>("j/devices") {
+        Ok(devices) => {
+            let keyboard = devices.keyboards.into_iter().find(|k| k.main);
+            if keyboard.is_none() {
+                error!("Failed to get keyboard device from hyprland");
+            }
+            keyboard
+        }
+        Err(err) => {
+            error!("Failed to get devices: {err:#}");
+            None
         }
     }
 }
 
-impl<'a, 'f, F> From<(&'a HWorkspace, Option<&str>, F)> for Visibility
-where
-    F: FnOnce(&'f HWorkspace) -> bool,
-    'a: 'f,
-{
-    fn from((workspace, active_name, is_visible): (&'a HWorkspace, Option<&str>, F)) -> Self {
-        if Some(workspace.name.as_str()) == active_name {
-            Self::focused()
-        } else if is_visible(workspace) {
-            Self::visible()
-        } else {
-            Self::Hidden
+/// Minimal subset of Hyprland's `workspaces` JSON.
+#[cfg(feature = "workspaces+hyprland")]
+#[derive(Deserialize)]
+struct HWorkspace {
+    id: i64,
+    name: String,
+    monitor: String,
+}
+
+/// Minimal subset of Hyprland's `monitors` JSON.
+#[cfg(feature = "workspaces+hyprland")]
+#[derive(Deserialize)]
+struct HMonitor {
+    #[serde(rename = "activeWorkspace")]
+    active_workspace: HWorkspaceRef,
+}
+
+/// Minimal subset of Hyprland's `clients` JSON.
+#[cfg(feature = "workspaces+hyprland")]
+#[derive(Deserialize)]
+struct HClient {
+    address: String,
+    workspace: HWorkspaceRef,
+}
+
+#[cfg(feature = "workspaces+hyprland")]
+#[derive(Deserialize)]
+struct HWorkspaceRef {
+    id: i64,
+}
+
+/// Minimal subset of Hyprland's `devices` JSON.
+#[cfg(feature = "keyboard+hyprland")]
+#[derive(Deserialize)]
+struct HDevices {
+    keyboards: Vec<HKeyboard>,
+}
+
+#[cfg(feature = "keyboard+hyprland")]
+#[derive(Deserialize)]
+struct HKeyboard {
+    name: String,
+    main: bool,
+    active_keymap: String,
+}
+
+#[cfg(feature = "workspaces+hyprland")]
+impl From<(Visibility, HWorkspace)> for Workspace {
+    fn from((visibility, workspace): (Visibility, HWorkspace)) -> Self {
+        Self {
+            id: workspace.id,
+            index: workspace.id,
+            name: workspace.name,
+            monitor: workspace.monitor,
+            visibility,
         }
     }
 }
