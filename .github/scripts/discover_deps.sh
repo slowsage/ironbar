@@ -7,14 +7,32 @@
 # Requires: cargo, jq, and an up-to-date apt-file database (`apt-file update`).
 set -euo pipefail
 
-# pkg-config module names declared by any crate in the dependency tree. For
-# system-deps the real module is the `name` field (the table key may be a
-# sanitised identifier, e.g. gdk_pixbuf_2_0 -> gdk-pixbuf-2.0); for the older
-# pkg-config convention the table key is the module name.
+# Collect pkg-config module names declared by crates in the *resolved* dependency
+# graph (so disabled optional crates are skipped), honouring per-feature gating:
+#
+#   - resolve.nodes gives each package id its set of active feature names.
+#   - a system-deps entry with `feature = "x"` is included only when feature `x`
+#     is active for that package (e.g. mlua-sys declares both `lua` and `luajit`,
+#     gated by features `lua5x` / `luajit`; only the enabled one is emitted).
+#   - entries without a `feature` (including `optional = true` ones, e.g. a
+#     vendored-fallback libevdev) are always included.
+#   - for system-deps the module is the `.name` field (the table key may be a
+#     sanitised identifier, e.g. gdk_pixbuf_2_0 -> gdk-pixbuf-2.0); for the older
+#     pkg-config convention the table key is the module name.
 modules=$(cargo metadata --format-version=1 | jq -r '
-  .packages[].metadata as $m
-  | (($m["system-deps"] // {}) | to_entries[] | .value.name // .key),
-    (($m["pkg-config"]   // {}) | keys[])
+  (reduce (.resolve.nodes[]?) as $n ({}; .[$n.id] = ($n.features // []))) as $feat
+  | .packages[] as $p
+  | select($feat | has($p.id))
+  | ($feat[$p.id]) as $active
+  | ($p.metadata // {}) as $m
+  | (
+      ( ($m["system-deps"] // {}) | to_entries[] | . as $e
+        | (if ($e.value | type) == "object" then $e.value.feature else null end) as $f
+        | select($f == null or ($active | index($f)))
+        | (if ($e.value | type) == "object" then ($e.value.name // $e.key) else $e.key end)
+      ),
+      ( ($m["pkg-config"] // {}) | keys[] )
+    )
 ' | sort -u)
 
 echo "pkg-config modules: $(echo "$modules" | tr '\n' ' ')" >&2
